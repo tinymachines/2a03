@@ -6,6 +6,6 @@ license = "MIT"
 description = "The 2A03 as a running machine: power-on and the reference's reset recipe, master-clock half-stepping, and the node dump the golden comparison rides on."
 
 [dependencies]
-halfphi = { git = "https://github.com/tinymachines/halfphi", tag = "v0.1.3" }
+halfphi = { git = "https://github.com/tinymachines/halfphi", tag = "v0.1.5" }
 nes-bus = { git = "https://github.com/tinymachines/nes-bus", tag = "v0.1.1" }
 v2a03-netlist = { path = "../v2a03-netlist" }
