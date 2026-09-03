@@ -1,0 +1,15 @@
+[package]
+name = "v2a03-netlist"
+version = "0.1.0"
+edition = "2021"
+# The crate's code is MIT; the die data it embeds when built is derived
+# from CC BY-NC-SA imagery (see NOTICE.md) and propagates those terms to
+# any artifact carrying it, exactly like v6502-netlist in the family.
+license = "MIT"
+description = "The Ricoh 2A03's die data, parsed by halfphi at build time from extern/visual2a03 and embedded; builds data-free (with a loud runtime refusal) when the extern is not fetched."
+
+[dependencies]
+halfphi = { git = "https://github.com/tinymachines/halfphi", tag = "v0.1.3" }
+
+[build-dependencies]
+halfphi = { git = "https://github.com/tinymachines/halfphi", tag = "v0.1.3" }

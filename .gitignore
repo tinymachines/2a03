@@ -1,0 +1,4 @@
+/target
+/extern/
+Cargo.lock
+tools/golden-trace/golden-*.txt
