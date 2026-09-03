@@ -1,0 +1,18 @@
+{
+  "note": "The A3 stimulus, authored once and read by both gen-a3.js and the Rust harness test. Enables square 0 at duty 50 percent, constant volume 15, length halted, timer 8: the sequencer steps every 2*(8+1) CPU cycles, so sq0_out repeats its 8-step duty pattern every 144 CPU cycles. Hand-assembled; the bytes are the program.",
+  "load": 32768,
+  "reset_vector": 32768,
+  "bytes": [169, 1, 141, 21, 64, 169, 191, 141, 0, 64, 169, 8, 141, 2, 64, 169, 0, 141, 3, 64, 76, 20, 128],
+  "asm": [
+    "8000: A9 01     LDA #$01",
+    "8002: 8D 15 40  STA $4015  ; enable square 0",
+    "8005: A9 BF     LDA #$BF   ; duty 10, halt, constant volume 15",
+    "8007: 8D 00 40  STA $4000",
+    "800A: A9 08     LDA #$08   ; timer low = 8",
+    "800C: 8D 02 40  STA $4002",
+    "800F: A9 00     LDA #$00   ; timer high = 0, load length",
+    "8011: 8D 03 40  STA $4003",
+    "8014: 4C 14 80  JMP $8014  ; spin"
+  ],
+  "half_steps": 2000
+}

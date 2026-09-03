@@ -18,6 +18,9 @@
 //! conducting once. Ground-gated transistors are permanently off in
 //! both models and need nothing.
 
+pub mod harness;
+pub mod mixer;
+
 use std::sync::Arc;
 
 use halfphi::{Engine, Netlist, NodeId};

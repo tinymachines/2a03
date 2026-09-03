@@ -13,6 +13,18 @@ the milestone log starts at `docs/a0-report.md`.
 
 ## Status
 
+A3 (first sound) is closed on top of A0: the memory harness runs the
+authored square-note program on the chip, the reference's own run of
+the same program replays through it bit-exact with no exemptions (core,
+APU and bus glue under one comparison), and sq0_out swings 0 to 15 in
+plateaus whose length derives from the program's own timer byte, ten of
+them measured at exactly 144 half-steps. Mixed through the authored
+nesdev table, the run emits nes-bus AudioSamples: silence and
+ad1(15, 0), nothing else. MUTATE=1 serves the timer operand XOR 1 and
+both gates go red, the replay at the byte's first bus crossing and the
+plateau at the mutated arithmetic's own 160. `docs/a3-report.md` is the
+account.
+
 A0 (the netlist loads, settles, and replays the reference) is closed:
 **10,946 transistors over 5,577 defined nodes agreed by both real
 parsers**, power-on converging unaided, and the reference simulator's
@@ -41,22 +53,26 @@ means most of the core stands still per master tick).
 | Crate | Role |
 |---|---|
 | `v2a03-netlist` | The die data parsed by halfphi at build time and embedded; builds data-free with a loud refusal when the extern is not fetched. |
-| `v2a03-sim` | Power-on and the reference's reset recipe, master half-stepping, and the node dump the golden comparison rides on. |
+| `v2a03-sim` | Power-on and the reference's reset recipe, master half-stepping, the node dump the golden comparison rides on, the memory harness, and the authored mixer. |
 
 ## Commands
 
 ```bash
 bash tools/fetch-netlist.sh          # Quietust's Visual 2A03, eight files,
                                      # sha256-pinned (never committed)
-cargo test --workspace --release     # counts, convergence, the golden;
+cargo test --workspace --release     # counts, convergence, the goldens,
+                                     # the A3 harness replay and the note;
                                      # tests SKIP by name without the extern
                                      # or the golden; REQUIRE_NETLIST=1 /
                                      # REQUIRE_GOLDEN=1 insist
 MUTATE=1 cargo test --workspace --release   # must go red: the supply-gated
-                                     # fix-up off, the replay diverges at
-                                     # step 0
-node tools/golden-trace/gen.js       # regenerate the golden
+                                     # fix-up off (A0 replay diverges at
+                                     # step 0) and the timer byte served
+                                     # wrong (A3 replay and plateau both)
+node tools/golden-trace/gen.js       # regenerate the A0 golden
                                      # (601 states, about 5 s)
+node tools/golden-trace/gen-a3.js    # regenerate the A3 golden (2,001
+                                     # states with memory, about 4 min)
 cargo run --release -p v2a03-sim --example bench             # quiescent throughput
 cargo run --release -p v2a03-sim --example a0-diverge-probe  # the measurement the
                                      # drive-order decision was made from
