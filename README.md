@@ -13,6 +13,17 @@ the milestone log starts at `docs/a0-report.md`.
 
 ## Status
 
+The pin-lockstep gate's chip side is in place: the 2A03's 6502 core is
+presented at the pins as a `v6502-pins` `PinFrame` (one per clk0 phase,
+the 6502's own half-cycle) and held to what a 6502 must do there, the
+reset vector fetched from $FFFC/$FFFD, execution entered at the vector,
+opcode fetches marked by sync, a store landing as a write. It depends
+on the `v6502-pins` contract alone (MIT, no die data), never on a 6502
+engine: a chip crate does not know what is on the other side of its
+pins. The cross-chip comparison against a recorded 6502 trace, and the
+decimal-mode divergence, are the second half and belong to the console
+layer where both chips are reachable.
+
 A3 (first sound) is closed on top of A0: the memory harness runs the
 authored square-note program on the chip, the reference's own run of
 the same program replays through it bit-exact with no exemptions (core,
