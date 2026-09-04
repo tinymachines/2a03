@@ -76,10 +76,18 @@ cargo test --workspace --release     # counts, convergence, the goldens,
                                      # tests SKIP by name without the extern
                                      # or the golden; REQUIRE_NETLIST=1 /
                                      # REQUIRE_GOLDEN=1 insist
-MUTATE=1 cargo test --workspace --release   # must go red: the supply-gated
-                                     # fix-up off (A0 replay diverges at
-                                     # step 0) and the timer byte served
-                                     # wrong (A3 replay and plateau both)
+MUTATE=1 cargo test --workspace --release   # must go red three ways: the
+                                     # supply-gated fix-up off (A0 replay
+                                     # diverges at step 0), the timer byte
+                                     # served wrong (A3 replay and plateau
+                                     # both), and R/W's polarity flipped in
+                                     # the extracted pin frame (the vector
+                                     # fetch fails its read check)
+cargo test --release -p v2a03-sim --test pin_lockstep
+                                     # the pin-lockstep gate, chip side: the
+                                     # core as a v6502-pins PinFrame per clk0
+                                     # phase, held to a conformant 6502's
+                                     # reset vector, sync and store
 node tools/golden-trace/gen.js       # regenerate the A0 golden
                                      # (601 states, about 5 s)
 node tools/golden-trace/gen-a3.js    # regenerate the A3 golden (2,001

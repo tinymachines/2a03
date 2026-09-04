@@ -22,6 +22,14 @@ use v2a03_sim::harness::Harness;
 use v2a03_sim::Cpu;
 use v6502_pins::PinFrame;
 
+/// `MUTATE=1` flips R/W's polarity in the extracted frame, the same
+/// shape as the 2c02's `MUTATE=rd` on its pin frame: every read presents
+/// as a write, so the vector fetch fails its read check and the test
+/// must go red. Proof that the pin checks can tell.
+fn mutate() -> bool {
+    std::env::var("MUTATE").is_ok_and(|v| v == "1")
+}
+
 /// Run `prog` at `load` (reset vector pointed there) and return one
 /// `PinFrame` per 6502 half-cycle (per `clk0` phase), for `frames`
 /// frames after power-on. `h` counts clk0 phases from the first one
@@ -62,7 +70,7 @@ fn extract(prog: &[u8], load: u16, frames: usize) -> Vec<PinFrame> {
                 clk0: c,
                 ab: bits(&har, &ab) as u16,
                 db: bits(&har, &db) as u8,
-                rw: har.cpu.engine.is_high(rw),
+                rw: har.cpu.engine.is_high(rw) != mutate(),
                 sync: har.cpu.engine.is_high(sync),
                 res: har.cpu.engine.is_high(res),
                 irq: har.cpu.engine.is_high(irq),
