@@ -9,7 +9,7 @@ license = "MIT"
 description = "The Ricoh 2A03's die data, parsed by halfphi at build time from extern/visual2a03 and embedded; builds data-free (with a loud runtime refusal) when the extern is not fetched."
 
 [dependencies]
-halfphi = { git = "https://github.com/tinymachines/halfphi", tag = "v0.1.5" }
+halfphi = { git = "https://github.com/tinymachines/halfphi", tag = "v0.1.6" }
 
 [build-dependencies]
-halfphi = { git = "https://github.com/tinymachines/halfphi", tag = "v0.1.5" }
+halfphi = { git = "https://github.com/tinymachines/halfphi", tag = "v0.1.6" }
