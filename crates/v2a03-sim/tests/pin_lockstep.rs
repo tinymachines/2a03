@@ -208,8 +208,10 @@ const RESET_TRACE: &str = "fixture-reset-mid-run";
 
 /// Traces whose program writes S (TXS, and SHS/TAS) before its first
 /// stack access: from there both cores hold the same S, so their own
-/// stack offset reads 0 and the stack page agrees outright.
-const S_SETTERS: &[&str] = &["op-9a", "op-9b"];
+/// stack offset reads 0 and the stack page agrees outright. The 6502's
+/// flags-harness chain (blargg's instr_test register harness) opens
+/// with LDX #s; TXS.
+const S_SETTERS: &[&str] = &["op-9a", "op-9b", "flags-harness"];
 
 fn pin_golden_dir() -> PathBuf {
     match std::env::var_os("PIN_GOLDEN") {

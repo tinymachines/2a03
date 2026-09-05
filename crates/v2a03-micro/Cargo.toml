@@ -12,8 +12,8 @@ description = "The 2A03's ladder rung: the 6502's rung 3 as this chip's core (de
 # (tests/knobs.rs at this revision). v6502-pins is pinned at the same
 # revision so the contract cannot drift between the two.
 [dependencies]
-v6502-micro = { git = "https://github.com/tinymachines/6502", package = "v6502-micro", rev = "76b28ab" }
-v6502-pins = { git = "https://github.com/tinymachines/6502", package = "v6502-pins", rev = "76b28ab" }
+v6502-micro = { git = "https://github.com/tinymachines/6502", package = "v6502-micro", rev = "5f169ab" }
+v6502-pins = { git = "https://github.com/tinymachines/6502", package = "v6502-pins", rev = "5f169ab" }
 
 # The APU tables are measured out of this chip's rung 0 at build time, so
 # the switch-level crates are build-dependencies and nothing at run time.
