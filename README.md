@@ -13,6 +13,23 @@ the milestone log starts at `docs/a0-report.md`.
 
 ## Status
 
+N3 step 4 (the APU as tables) is closed (`docs/n3-report.md`):
+`v2a03-micro` carries the APU authored around tables measured out of
+rung 0 at build time (the length table, the duty sequences, the frame
+sequencer's positions in both modes, and the two timers step 4 found to
+be LFSRs rather than counters, `noi_t` and `pcm_t`, with their taps,
+terminals and sixteen reload states each: the die's period ROMs, which
+is where the noise table's index 12 comes from). Held to rung 0 on two
+register programs under both frame modes: **four worlds of 80,001
+half-steps, the five output codes and the frame IRQ flag identical at
+every half-step**, envelopes, both sweep complements to their mutes,
+length and linear expiries, the noise LFSR and the DMC's byte cycle,
+loop and end included. Every timing inside a unit is a fitted constant
+in `apu::fit`, each measured with a probe when the gate's code streams
+first parted. **32.1 M half-cycles/s with the APU attached, 9.0x real
+time.** `MUTATE=1` reverses the duty table at build time and the gate
+goes red. Carried: the stalls (step 5) and the reset hold (step 2).
+
 N3 step 3 (the APU probes) is closed (`docs/n3-report.md`): eleven
 headless measurements off rung 0, kept as examples, are the instruments
 step 4's tables and datapath are authored from: the frame sequencer's
@@ -107,7 +124,7 @@ means most of the core stands still per master tick).
 | Crate | Role |
 |---|---|
 | `v2a03-netlist` | The die data parsed by halfphi at build time and embedded; builds data-free with a loud refusal when the extern is not fetched. |
-| `v2a03-micro` | The ladder rung: `v6502-micro` (a git dependency pinned by revision; its table measured out of the 6502's rung 0 at build time) as this chip's core, and the APU as tables to follow. |
+| `v2a03-micro` | The ladder rung: `v6502-micro` (a git dependency pinned by revision; its table measured out of the 6502's rung 0 at build time) as this chip's core, and the APU authored around tables measured out of this chip's rung 0 at build time (`build.rs`, about a minute). |
 | `v2a03-sim` | Power-on and the reference's reset recipe, master half-stepping, the node dump the golden comparison rides on, the memory harness, the core at the `v6502-pins` contract with the cross-chip classifier, and the authored mixer. |
 
 ## Commands
@@ -120,15 +137,16 @@ cargo test --workspace --release     # counts, convergence, the goldens,
                                      # tests SKIP by name without the extern
                                      # or the golden; REQUIRE_NETLIST=1 /
                                      # REQUIRE_GOLDEN=1 insist
-MUTATE=1 cargo test --workspace --release   # must go red five ways: the
+MUTATE=1 cargo test --workspace --release   # must go red six ways: the
                                      # supply-gated fix-up off (A0 replay
                                      # diverges at step 0), the timer byte
                                      # served wrong (A3 replay and plateau
                                      # both), R/W's polarity flipped in the
                                      # extracted pin frame (the vector fetch
                                      # fails its read check), one serviced bit
-                                     # flipped in the cross-chip replay, and
-                                     # the core rung's decimal adjust left on
+                                     # flipped in the cross-chip replay, the
+                                     # core rung's decimal adjust left on, and
+                                     # the APU's duty table reversed
 REQUIRE_PINS=1 cargo test --release -p v2a03-sim --test pin_lockstep
                                      # the pin-lockstep gate, both halves: the
                                      # core as a v6502-pins PinFrame per clk0
@@ -143,18 +161,31 @@ REQUIRE_PINS=1 cargo test --release -p v2a03-micro --test core
                                      # every field but the write-phi1 byte;
                                      # MUTATE=1 reconnects the decimal adjust
                                      # and the three decimal chains go red
-cargo run --release -p v2a03-micro --example bench   # the core rung beside rung 0
+REQUIRE_NETLIST=1 cargo test --release -p v2a03-micro --test apu
+                                     # N3 step 4: the APU's five output codes
+                                     # and the frame IRQ against rung 0 every
+                                     # half-step, two programs, both frame
+                                     # modes; APU_DUMP=1 prints both streams
+                                     # around the first divergence; MUTATE=1
+                                     # reverses the duty table (rebuilds)
+cargo run --release -p v2a03-micro --example bench   # the core rung, alone and
+                                     # with the APU, beside rung 0
+cargo run --release -p v2a03-micro --example apu-trace -- 100 140
+                                     # the authored APU's state per half-step
 cargo run --release -p v2a03-sim --example apu-frame-probe -- 0     # the frame
                                      # sequencer: 0 = 4-step, 1 = 5-step,
                                      # 2 = no $4017 write (power-on position)
 cargo run --release -p v2a03-sim --example apu-length-probe # the 32-entry length table
 cargo run --release -p v2a03-sim --example apu-dma-probe    # $4014: RDY, the 256 pairs,
                                      # the stall at two alignments
-cargo run --release -p v2a03-sim --example apu-channel-probe -- duty env sweep tri noise dmc io
+cargo run --release -p v2a03-sim --example apu-channel-probe -- duty env sweep tri noise dmc io seq dmcseq lfsr triseq
                                      # the channels: duty sequences, envelope,
                                      # sweep, triangle, noise table and taps,
-                                     # DMC table and fetch, controller strobes
-                                     # (about two minutes for all seven)
+                                     # DMC table and fetch, controller strobes,
+                                     # then the per-half-step traces step 4's
+                                     # constants were fitted from (a square's
+                                     # timer, the DMC's output unit, the two
+                                     # LFSR timers, the triangle's timer)
 cargo run --release -p v2a03-sim --example lockstep-probe   # every trace, every
                                      # differing field classified: the
                                      # measurement the gate's rules are from

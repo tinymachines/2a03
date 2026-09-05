@@ -46,4 +46,35 @@ fn main() {
         best / r0_rate,
         best / real_time
     );
+
+    // The whole rung: the core with the APU fed from its writes, as the
+    // gate runs it, over a program that plays every channel.
+    let mut prog = Vec::new();
+    for (r, v) in [(0x17u8, 0x00u8), (0x15, 0x0f), (0x00, 0xa6), (0x01, 0xa9), (0x02, 0xab), (0x03, 0x09), (0x04, 0x7f), (0x05, 0x91), (0x06, 0x00), (0x07, 0x3a), (0x08, 0xc0), (0x0a, 0x50), (0x0b, 0x48), (0x0c, 0x04), (0x0e, 0x04), (0x0f, 0x10), (0x10, 0x4f), (0x11, 0x20), (0x12, 0x00), (0x13, 0x02), (0x15, 0x1f)] {
+        prog.extend([0xa9, v, 0x8d, r, 0x40]);
+    }
+    let spin = 0x8000 + prog.len() as u16;
+    prog.extend([0x4c, spin as u8, (spin >> 8) as u8]);
+    let loads = vec![v6502_pins::Load { org: 0x8000, bytes: prog }, v6502_pins::Load { org: 0xc000, bytes: vec![0xa5; 33] }];
+    let mut best_apu = 0.0f64;
+    for _ in 0..3 {
+        let mut m = v2a03_micro::core(&loads, 0x8000, s);
+        let mut apu = v2a03_micro::apu::Apu::new();
+        let t = Instant::now();
+        for _ in 0..n_rung {
+            m.half_step();
+            let f = m.pins();
+            if !f.rw && f.clk0 && (0x4000..=0x4017).contains(&f.ab) {
+                apu.write((f.ab & 0x1f) as u8, f.db);
+            }
+            apu.half_step(&m.mem);
+        }
+        best_apu = best_apu.max(n_rung as f64 / t.elapsed().as_secs_f64());
+        std::hint::black_box(apu.codes());
+    }
+    println!(
+        "core rung with the APU: {best_apu:.0} half-cycles/s over {n_rung} (best of 3), {:.0}x rung 0, {:.1}x real time",
+        best_apu / r0_rate,
+        best_apu / real_time
+    );
 }

@@ -15,6 +15,12 @@ description = "The 2A03's ladder rung: the 6502's rung 3 as this chip's core (de
 v6502-micro = { git = "https://github.com/tinymachines/6502", package = "v6502-micro", rev = "dc2dada" }
 v6502-pins = { git = "https://github.com/tinymachines/6502", package = "v6502-pins", rev = "dc2dada" }
 
+# The APU tables are measured out of this chip's rung 0 at build time, so
+# the switch-level crates are build-dependencies and nothing at run time.
+[build-dependencies]
+v2a03-sim = { path = "../v2a03-sim" }
+v2a03-netlist = { path = "../v2a03-netlist" }
+
 [dev-dependencies]
 v2a03-sim = { path = "../v2a03-sim" }
 v2a03-netlist = { path = "../v2a03-netlist" }

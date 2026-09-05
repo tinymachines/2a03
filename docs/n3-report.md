@@ -267,3 +267,100 @@ two complements, the linear counter, the LFSR taps, the DMC's delta
 counter and fetch) is authored from the probes above and labelled. The
 gate stays the plan's: the five output codes against rung 0 every CPU
 half-step, on a program that exercises every channel.
+
+## Step 4: the APU as tables (closed 2026-09-05)
+
+Run stamp: rustc 1.97.1, halfphi v0.1.6. `REQUIRE_NETLIST=1 cargo test
+--release -p v2a03-micro --test apu`: green in about 20 s after the
+build, which now records the APU tables off rung 0 in about a minute.
+`MUTATE=1` reverses the duty table at build time and the gate goes red
+at the first square step.
+
+### The gate
+
+Two register programs (a long-note world: both squares with envelope
+and sweep, one negating; the triangle with its control set; the noise;
+the DMC looping a 33-byte sample. A short-note world: lengths of one
+and three half frames, envelopes without loop, the triangle's control
+clear with a linear counter of five, the DMC playing 17 bytes once),
+each under both frame sequencer modes, each run 80,000 half-steps on
+this chip's rung 0 through `CorePins` and on the rung (the core with
+the APU fed from its own phi2 writes). **All four worlds: 80,001
+half-steps, the five output codes (`sq0_out`, `sq1_out`, `tri_out`,
+`noi_out`, `pcm_out`) and the frame IRQ flag identical to rung 0 at
+every half-step.** That covers the duty sequences and step timing,
+the envelope's start and decay, both sweep complements to their mutes,
+the length expiries, the linear counter's load and expiry, the noise
+LFSR through 12,000 shifts, the DMC's timer, byte cycle, delta
+counter, sample loop and end, and the frame IRQ.
+
+### Measured at build time (`build.rs`, `tables`)
+
+The length table, the duty sequences and the frame positions of step
+3, and two things step 3 had not seen:
+
+- **The noise and DMC timers are LFSRs, not counters.** `noi_t` (11
+  bits) and `pcm_t` (9 bits) free-run from power-on, shifting left with
+  the XOR of two taps fed in, fitted over their free run and exact on
+  every observed step: taps (10, 8) for the noise, (8, 4) for the DMC.
+  Each has one terminal state (1024 and 256) at which the next tick
+  reloads it with a per-index value, the die's period ROM: sixteen
+  reload states per timer, recorded. The published period tables are
+  the distances from those states to the terminal; index 12 of the
+  noise ROM lands 482 ticks out where the published 762-cycle entry
+  would be 381, which is what step 3's disagreement is. Both stand at
+  8 at the pin contract's h=0 and tick on frames with h = 0 mod 4; the
+  squares and triangle tick on h = 2 mod 4 and every phi2 respectively.
+
+### Authored from the probes, and the fitted constants (`apu::fit`)
+
+Everything below was found by running the gate, reading where the
+code streams first parted (`APU_DUMP=1` prints both streams' change
+events around it), measuring the mechanism on rung 0 with a probe, and
+pinning one constant. The order they landed in is the order the gate
+found them.
+
+- A square's $4003 write leaves its timer alone; the die's step counter
+  (`sq_c`, counting down 7..0) held at 0 from power-on with the period
+  0, and the first tick after a nonzero period reloads and steps
+  (`seq` probe). The output code lags the step by 2 half-steps.
+- **A low-byte period write makes the timer's next tick a reload, not a
+  decrement**, on the squares and the triangle alike: the triangle's
+  tick frame is the strobe frame, so its `tri_t` shows the period on the
+  strobe itself; a square's next tick is three frames on, and the duty
+  drop lands one tick after an immediate load would put it. The high
+  byte's write leaves the timer alone.
+- The DMC's output unit counts completions from power-on with silence
+  set (`dmcseq`): the eighth completion after enabling loads the buffer
+  into the shifter and fetches the next byte, and only then does the
+  level move, by 2 per bit, the byte boundary coinciding with the load.
+  The noise shift and the DMC completion show 3 half-steps after the
+  tick that lands their timer on its terminal.
+- A frame phase's rise reaches the envelopes and sweeps 1 half-step
+  later (their codes then show it through the 2-half-step output lag),
+  the triangle's linear counter 3 later (its output has no lag), and
+  the squares' length counters 3 later (their expiry shows two
+  half-steps after the noise's from the same clock).
+- Unmeasured and authored from the published model, each unobservable
+  in the gate's programs: the $4003 write's restart of the sequencer
+  step, the envelope's loop, the DMC's IRQ and its output clamp at 0
+  and 127, and the $4015 status byte.
+
+### Throughput (`examples/bench.rs`)
+
+| engine | half-cycles/s |
+|---|---|
+| rung 0 through the memory harness | 11,294 |
+| the core rung alone | 41,926,421 |
+| the core rung with the APU | 32,067,032 |
+
+**About 2,839x rung 0 and 9.0x the 2A03's real time** with the APU
+attached, so nothing is built for speed.
+
+### Carried
+
+- The stalls (step 5): the DMC fetch holds RDY 5 to 7 half-steps and
+  the sprite DMA 1027 or 1029; the rung's core does not yet see them.
+- The reset hold from step 2.
+- `$4015` reads, and the frame IRQ's clear on that read, are authored
+  and unexercised: the gate's programs never read.

@@ -239,7 +239,7 @@ fn noise() {
         let mut prog = Vec::new();
         prog.extend(w(0x15, 0x08));
         prog.extend(w(0x0c, 0x3f));
-        prog.extend(w(0x0e, (mode << 7) | 0x00));
+        prog.extend(w(0x0e, mode << 7));
         prog.extend(w(0x0f, 0x00));
         let mut p = P::new(&prog);
         let w0 = p.until_write("w400f", 4000);
@@ -355,6 +355,202 @@ fn io() {
     }
 }
 
+fn seq() {
+    println!("## seq: square 1 (duty 1, constant 15, halt, timer $200) per half-step from the $4007 write: c, out, t, p, len, silence");
+    let mut prog = Vec::new();
+    prog.extend(w(0x15, 0x03));
+    prog.extend(w(0x04, 0x7f));
+    prog.extend(w(0x05, 0x00));
+    prog.extend(w(0x06, 0x00));
+    prog.extend(w(0x07, 0x3a));
+    let mut p = P::new(&prog);
+    // From a little before the strobe: the strobe's own frame is h+0.
+    let w0 = p.until_write("w4007", 4000);
+    let mut lines = Vec::new();
+    let mut prev = (99u32, 99u32);
+    for i in 0..4200usize {
+        let c = p.bits("sq1_c", 3);
+        let o = p.bits("sq1_out", 4);
+        let t = p.bits("sq1_t", 11);
+        let l = format!(
+            "  h+{:>4} clk0={} c={c} out={o:>2} t={t:>4} p=${:03x} len={} silence={} on={}",
+            i, p.hi("clk0") as u8, p.bits("sq1_p", 11), p.bits("sq1_len", 8), p.hi("sq1_silence") as u8, p.hi("sq1_on") as u8
+        );
+        if i < 24 || (c, o) != prev {
+            lines.push(l);
+        }
+        prev = (c, o);
+        p.step();
+        if lines.len() > 60 {
+            break;
+        }
+    }
+    let _ = w0;
+    for l in lines {
+        println!("{l}");
+    }
+}
+
+fn dmcseq() {
+    println!("## dmcseq: the DMC (loop, rate 15, level $20, $C000 x 33) per half-step from the $4015 enable: t, bits, sr, buf, out, dma_active, rd_active, rdy, ab");
+    let mut prog = Vec::new();
+    prog.extend(w(0x10, 0x4f));
+    prog.extend(w(0x11, 0x20));
+    prog.extend(w(0x12, 0x00));
+    prog.extend(w(0x13, 0x02));
+    prog.extend(w(0x15, 0x1f));
+    let mut p = P::new(&prog);
+    for i in 0..33usize {
+        p.h.memory[0xc000 + i] = (i as u8).wrapping_mul(0x5b) ^ 0xa5;
+    }
+    p.until_write("w4015", 4000);
+    let mut prev = String::new();
+    let mut n = 0;
+    for i in 0..4000usize {
+        let key = format!(
+            "bits={} sr={:02x} buf={:02x} out={:>3} dma={} rd={} rdy={} loadbuf={} loadsr={} shiftsr={} en={} on={} lc={} a={:04x}",
+            p.bits("pcm_bits", 3), p.bits("pcm_sr", 8), p.bits("pcm_buf", 8), p.bits("pcm_out", 7),
+            p.hi("pcm_dma_active") as u8, p.hi("pcm_rd_active") as u8, p.hi("rdy") as u8,
+            p.hi("pcm_loadbuf") as u8, p.hi("pcm_loadsr") as u8, p.hi("pcm_shiftsr") as u8,
+            p.hi("pcm_en") as u8, p.hi("pcm_on") as u8, p.bits("pcm_lc", 12), p.bits("pcm_a", 15)
+        );
+        if key != prev && n < 70 {
+            println!("  h+{:>4} clk0={} ab={:04x} t={:>3} {key}", i, p.hi("clk0") as u8, p.bits("ab", 16), p.bits("pcm_t", 9));
+            n += 1;
+        }
+        prev = key;
+        p.step();
+    }
+}
+
+/// The LFSR-shaped timers (`pcm_t`, 9 bits; `noi_t`, 11 bits): the value
+/// at the contract's h=0, the tick phase (h mod 4 of the frames where the
+/// value changes), whether the observed successor relation is a function
+/// (one next per state), and the (before, after) pair at each of the
+/// first three reload events for a given rate or index.
+fn lfsr() {
+    for (name, prefix, bits, regs, strobe) in [
+        ("dmc rate 15", "pcm_t", 9usize, vec![w(0x10, 0x4f), w(0x11, 0x20), w(0x12, 0x00), w(0x13, 0x02), w(0x15, 0x1f)], "w4015"),
+        ("dmc rate 0", "pcm_t", 9, vec![w(0x10, 0x40), w(0x11, 0x20), w(0x12, 0x00), w(0x13, 0x02), w(0x15, 0x1f)], "w4015"),
+        ("noise index 0", "noi_t", 11, vec![w(0x15, 0x08), w(0x0c, 0x3f), w(0x0e, 0x00), w(0x0f, 0x00)], "w400f"),
+        ("noise index 4", "noi_t", 11, vec![w(0x15, 0x08), w(0x0c, 0x3f), w(0x0e, 0x04), w(0x0f, 0x00)], "w400f"),
+    ] {
+        let mut prog = Vec::new();
+        for r in &regs {
+            prog.extend(*r);
+        }
+        let mut p = P::new(&prog);
+        for i in 0..33usize {
+            p.h.memory[0xc000 + i] = 0xa5;
+        }
+        for _ in 0..v2a03_sim::pins::ALIGN_PHASES {
+            p.step();
+        }
+        let at_h0 = p.bits(prefix, bits);
+        // The timer's value at each register write strobe of the program,
+        // so the write that starts it is read off, not assumed.
+        {
+            let mut q = P::new(&prog);
+            for i in 0..33usize {
+                q.h.memory[0xc000 + i] = 0xa5;
+            }
+            let strobes = ["w4015", "w400c", "w400e", "w400f", "w4010", "w4011", "w4012", "w4013"];
+            let mut prev: Vec<bool> = strobes.iter().map(|s| q.hi(s)).collect();
+            let mut seen = Vec::new();
+            let mut after: Vec<u32> = Vec::new();
+            for i in 0..90usize {
+                q.step();
+                for (k, name) in strobes.iter().enumerate() {
+                    let v = q.hi(name);
+                    if v && !prev[k] {
+                        seen.push(format!("{name}@{i}:{}", q.bits(prefix, bits)));
+                    }
+                    prev[k] = v;
+                }
+                after.push(q.bits(prefix, bits));
+            }
+            let mut firsts: Vec<u32> = Vec::new();
+            for w in after.windows(2) {
+                if w[1] != w[0] && firsts.len() < 14 {
+                    firsts.push(w[1]);
+                }
+            }
+            println!("## lfsr {name}: {prefix} at each write strobe {seen:?}; the first values after it starts moving {firsts:?}");
+        }
+        let mut next: std::collections::BTreeMap<u32, std::collections::BTreeSet<u32>> = Default::default();
+        let mut prev = at_h0;
+        let mut phases = std::collections::BTreeSet::new();
+        let mut jumps = Vec::new();
+        let mut first_shift = None;
+        let shift_node = if prefix == "pcm_t" { "pcm_shift_t" } else { "noi_t" };
+        let _ = shift_node;
+        let w0 = p.until_write(strobe, 6000);
+        let mut h = v2a03_sim::pins::ALIGN_PHASES as usize + w0 + 1;
+        let lfsr_before = p.bits("noi_c", 15);
+        let mut lfsr_prev = lfsr_before;
+        for _ in 0..40_000usize {
+            p.step();
+            h += 1;
+            let v = p.bits(prefix, bits);
+            if v != prev {
+                phases.insert(h % 4);
+                next.entry(prev).or_default().insert(v);
+                // A reload is a step the shift relation does not explain:
+                // detect it as the value the LFSR rule would not produce.
+                let rule = ((prev << 1) & ((1 << bits) - 1)) | (v & 1);
+                if v != rule {
+                    jumps.push((prev, v, h));
+                }
+                prev = v;
+            }
+            if prefix == "noi_t" {
+                let c = p.bits("noi_c", 15);
+                if c != lfsr_prev {
+                    first_shift.get_or_insert(h);
+                    lfsr_prev = c;
+                }
+            } else if p.hi("pcm_shift_t") {
+                first_shift.get_or_insert(h);
+            }
+            if jumps.len() >= 4 {
+                break;
+            }
+        }
+        let multi = next.values().filter(|s| s.len() > 1).count();
+        println!(
+            "## lfsr {name}: {prefix} at h=0 is {at_h0} (${at_h0:03x}); ticks on frames with h%4 in {phases:?}; {} states observed, {multi} with more than one successor; first shift/reload event at h={first_shift:?}; jumps (before, after, h): {jumps:?}",
+            next.len()
+        );
+    }
+}
+
+fn triseq() {
+    println!("## triseq: the triangle timer (tri_t), step (tri_c), linear (tri_lin) and out per half-step around the $400A/$400B writes and the first steps; the gate program's triangle");
+    let mut prog = Vec::new();
+    prog.extend(w(0x15, 0x0f));
+    prog.extend(w(0x08, 0xc0));
+    prog.extend(w(0x0a, 0x50));
+    prog.extend(w(0x0b, 0x48));
+    let mut p = P::new(&prog);
+    for _ in 0..v2a03_sim::pins::ALIGN_PHASES {
+        p.step();
+    }
+    let mut prev = (u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX);
+    let mut n = 0;
+    for k in 1..=15_700usize {
+        p.step();
+        let now = (p.bits("tri_t", 11), p.bits("tri_c", 5), p.bits("tri_lin", 7), p.bits("tri_out", 4), p.bits("tri_lc", 7));
+        let strobe = p.hi("w400a") || p.hi("w400b") || p.hi("w4008");
+        let interesting = k < 60 || now.1 != prev.1 || now.2 != prev.2 || now.3 != prev.3 || now.4 != prev.4 || (k > 14700 && (now.0 == 0 || now.0 == 0x50));
+        if ((now != prev && interesting) || strobe)
+            && n < 120 {
+                println!("  h={k:>5} clk0={} ab={:04x} t={:>3} c={:>2} lin={} lc={:>3} out={:>2}{}", p.hi("clk0") as u8, p.bits("ab", 16), now.0, now.1, now.2, now.4, now.3, if strobe { " STROBE" } else { "" });
+                n += 1;
+            }
+        prev = now;
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let all = args.is_empty();
@@ -366,4 +562,8 @@ fn main() {
     if want("noise") { noise(); }
     if want("dmc") { dmc(); }
     if want("io") { io(); }
+    if want("seq") { seq(); }
+    if want("dmcseq") { dmcseq(); }
+    if want("lfsr") { lfsr(); }
+    if want("triseq") { triseq(); }
 }

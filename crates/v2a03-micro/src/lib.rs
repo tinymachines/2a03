@@ -10,6 +10,24 @@
 
 #![forbid(unsafe_code)]
 
+pub mod apu;
+
+/// The tables measured out of rung 0 at build time (`build.rs`).
+pub mod tables {
+    /// An LFSR-shaped timer as the die builds two of them: it free-runs
+    /// from `at_h0`, each tick shifting left with the XOR of the two
+    /// `taps` fed in, and when it stands at `terminal` the next tick
+    /// reloads it with `reload[rate]` and clocks its unit.
+    #[derive(Debug)]
+    pub struct LfsrTimer {
+        pub at_h0: u32,
+        pub taps: (u8, u8),
+        pub terminal: u32,
+        pub reload: [u16; 16],
+    }
+    include!(concat!(env!("OUT_DIR"), "/tables.rs"));
+}
+
 use v6502_micro::machine::MicroCpu;
 use v6502_pins::Load;
 
