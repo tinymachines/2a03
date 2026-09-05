@@ -31,7 +31,7 @@ use v2a03_sim::lockstep::{classify, WRITE_PHI1};
 use v2a03_sim::pins::CorePins;
 use v6502_pins::{line, parse_stim, parse_trace, run, PinEngine};
 
-const ABSENT_PIN_TRACES: &[&str] = &["fixture-rdy-stall", "fixture-so-pulse"];
+const ABSENT_PIN_TRACES: &[&str] = &["fixture-rdy-stall", "fixture-rdy-in-write", "fixture-rdy-release-phi1", "fixture-so-pulse"];
 const DECIMAL_TRACES: &[&str] = &["decimal-adc", "decimal-sbc", "decimal-mixed"];
 
 /// Programs the core rung is known not to reproduce on this die, each

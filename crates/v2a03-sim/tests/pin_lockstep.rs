@@ -179,8 +179,10 @@ fn the_core_presents_a_conformant_6502_at_the_pins() {
 // ---------------------------------------------------------------------------
 
 /// Scripts that drive pins the 2A03 does not have. RDY is an internal
-/// node its DMA units own; SO is an unbonded pad the reference holds low.
-const ABSENT_PIN_TRACES: &[&str] = &["fixture-rdy-stall", "fixture-so-pulse"];
+/// node its DMA units own (three scripts drive it: the stall, the fall
+/// inside a write cycle, the phi1 release); SO is an unbonded pad the
+/// reference holds low.
+const ABSENT_PIN_TRACES: &[&str] = &["fixture-rdy-stall", "fixture-rdy-in-write", "fixture-rdy-release-phi1", "fixture-so-pulse"];
 
 /// The trace whose program copies S into X (TSX at $0207) and then runs
 /// the `$34 $12` operand bytes as `NOP zp,X`: the power-on stack pointer

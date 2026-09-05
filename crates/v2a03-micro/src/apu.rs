@@ -424,6 +424,11 @@ pub struct Dmc {
     timer: Timer,
     pub irq: bool,
     enabled: bool,
+    /// A sample byte fetched this half-step, for the rung's stall: the
+    /// address, and whether the enable write asked for it (the byte
+    /// boundary's fetch and the enable's reach the bus on different
+    /// schedules, measured).
+    pub fetched: Option<(u16, bool)>,
 }
 
 impl Default for Dmc {
@@ -446,6 +451,7 @@ impl Default for Dmc {
             timer: Timer::new(&tables::DMC_TIMER, 9, fit::DMC_UNIT_LAG),
             irq: false,
             enabled: false,
+            fetched: None,
         }
     }
 }
@@ -475,6 +481,9 @@ impl Dmc {
             }
             if self.buffer.is_none() {
                 self.fetch(mem);
+                if let Some(f) = self.fetched.as_mut() {
+                    f.1 = true;
+                }
             }
         } else {
             self.remaining = 0;
@@ -484,6 +493,7 @@ impl Dmc {
         if self.remaining == 0 {
             return;
         }
+        self.fetched = Some((self.addr, false));
         self.buffer = Some(mem[self.addr as usize]);
         self.addr = if self.addr == 0xffff { 0x8000 } else { self.addr + 1 };
         self.remaining -= 1;

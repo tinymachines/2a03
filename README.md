@@ -13,6 +13,20 @@ the milestone log starts at `docs/a0-report.md`.
 
 ## Status
 
+**N3 is closed** (`docs/n3-plan.md`, `docs/n3-report.md`, five steps).
+The chip is `v2a03-micro`: the 6502's rung 3 as the core with the
+decimal adjust disconnected and the stack pointer seeded, the APU
+authored around tables measured out of this chip's rung 0 at build
+time, and the two DMA units authored from frame measurements, the
+whole presented at the pin contract by `Rung`, which is what a console
+attaches to. Step 5 (the stalls) closed last: the sprite DMA at both
+write alignments and the DMC's sample fetches against rung 0 **frame
+for frame in every field, RDY included** (1,201 + 1,201 + 4,201
+frames; RDY low on 1,029, 1,027 and 19). `MUTATE=1` shortens the DMA by
+a pair and the gate goes red. About 9x real time with everything
+attached. Carried: the reset hold (step 2), `$4015` reads, a DMC fetch
+inside a sprite DMA.
+
 N3 step 4 (the APU as tables) is closed (`docs/n3-report.md`):
 `v2a03-micro` carries the APU authored around tables measured out of
 rung 0 at build time (the length table, the duty sequences, the frame
@@ -124,7 +138,7 @@ means most of the core stands still per master tick).
 | Crate | Role |
 |---|---|
 | `v2a03-netlist` | The die data parsed by halfphi at build time and embedded; builds data-free with a loud refusal when the extern is not fetched. |
-| `v2a03-micro` | The ladder rung: `v6502-micro` (a git dependency pinned by revision; its table measured out of the 6502's rung 0 at build time) as this chip's core, and the APU authored around tables measured out of this chip's rung 0 at build time (`build.rs`, about a minute). |
+| `v2a03-micro` | The ladder rung: `v6502-micro` (a git dependency pinned by revision; its table measured out of the 6502's rung 0 at build time) as this chip's core, the APU authored around tables measured out of this chip's rung 0 at build time (`build.rs`, about a minute), and `Rung`, the whole chip at the pin contract with its DMA units. |
 | `v2a03-sim` | Power-on and the reference's reset recipe, master half-stepping, the node dump the golden comparison rides on, the memory harness, the core at the `v6502-pins` contract with the cross-chip classifier, and the authored mixer. |
 
 ## Commands
@@ -137,7 +151,7 @@ cargo test --workspace --release     # counts, convergence, the goldens,
                                      # tests SKIP by name without the extern
                                      # or the golden; REQUIRE_NETLIST=1 /
                                      # REQUIRE_GOLDEN=1 insist
-MUTATE=1 cargo test --workspace --release   # must go red six ways: the
+MUTATE=1 cargo test --workspace --release   # must go red seven ways: the
                                      # supply-gated fix-up off (A0 replay
                                      # diverges at step 0), the timer byte
                                      # served wrong (A3 replay and plateau
@@ -145,8 +159,9 @@ MUTATE=1 cargo test --workspace --release   # must go red six ways: the
                                      # extracted pin frame (the vector fetch
                                      # fails its read check), one serviced bit
                                      # flipped in the cross-chip replay, the
-                                     # core rung's decimal adjust left on, and
-                                     # the APU's duty table reversed
+                                     # core rung's decimal adjust left on, the
+                                     # APU's duty table reversed, and the sprite
+                                     # DMA a pair short
 REQUIRE_PINS=1 cargo test --release -p v2a03-sim --test pin_lockstep
                                      # the pin-lockstep gate, both halves: the
                                      # core as a v6502-pins PinFrame per clk0
@@ -161,6 +176,16 @@ REQUIRE_PINS=1 cargo test --release -p v2a03-micro --test core
                                      # every field but the write-phi1 byte;
                                      # MUTATE=1 reconnects the decimal adjust
                                      # and the three decimal chains go red
+REQUIRE_NETLIST=1 cargo test --release -p v2a03-micro --test stalls
+                                     # N3 step 5: the whole chip at the pins
+                                     # (Rung) against rung 0 frame for frame
+                                     # through a sprite DMA at both alignments
+                                     # and the DMC's fetches; MUTATE=1 drops a
+                                     # DMA pair
+cargo run --release -p v2a03-sim --example stall-probe -- dma   # the two stalls as
+                                     # rung 0 shows them (dma | dmc)
+cargo run --release -p v2a03-micro --example rung-trace -- 8 24  # the rung's frame
+                                     # beside its core's, under the DMA
 REQUIRE_NETLIST=1 cargo test --release -p v2a03-micro --test apu
                                      # N3 step 4: the APU's five output codes
                                      # and the frame IRQ against rung 0 every

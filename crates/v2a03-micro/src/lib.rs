@@ -11,6 +11,7 @@
 #![forbid(unsafe_code)]
 
 pub mod apu;
+pub mod rung;
 
 /// The tables measured out of rung 0 at build time (`build.rs`).
 pub mod tables {

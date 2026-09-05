@@ -364,3 +364,69 @@ attached, so nothing is built for speed.
 - The reset hold from step 2.
 - `$4015` reads, and the frame IRQ's clear on that read, are authored
   and unexercised: the gate's programs never read.
+
+## Step 5: the stalls (closed 2026-09-05)
+
+Run stamp: rustc 1.97.1, halfphi v0.1.6, `v6502-micro` at `dc2dada`.
+`REQUIRE_NETLIST=1 cargo test --release -p v2a03-micro --test stalls`:
+green in under a second after the build. `MUTATE=1` shortens the sprite
+DMA by one pair and the gate goes red at the last pair.
+
+### What closed
+
+`src/rung.rs` is the whole chip at the pins: `Rung` implements the pin
+contract over the core rung, the APU fed from the core's own writes, and
+the two DMA units, which take the bus from the core and present their
+own frames while they hold it. It is what a console attaches to.
+
+**The gate**: `Rung` against rung 0 through `CorePins`, every frame,
+every field, RDY included, over three programs: a $4014 sprite DMA
+written on an even CPU cycle and on an odd one, and the DMC fetching
+its sample. **1,201 + 1,201 + 4,201 frames identical in every field**
+(no write-phi1 byte even arises: nothing in these programs writes
+during a comparison window but the DMA itself, and its bytes agree),
+RDY low on 1,029, 1,027 and 19 of them.
+
+### Measured (`v2a03-sim/examples/stall-probe.rs`) and authored
+
+- **The sprite DMA.** RDY falls on the $4014 write's own frame. The
+  core repeats its next read cycle, the opcode fetch, sync high, until
+  the first "get" frame at least three frames on (h = 0 mod 4; the
+  write on an even cycle waits two cycles, on an odd one waits one),
+  then 256 pairs: a read of the source page on a get cycle, a write of
+  that byte to $2004 on the put cycle after it, 1,024 frames. RDY is
+  high again on the frame after the last write, and the held fetch
+  then runs for real, once, before the next cycle.
+- **The DMC fetch.** RDY falls one frame after the byte-boundary
+  completion that empties the buffer, and six frames after the enable
+  write when the buffer starts empty. The core repeats its next read
+  cycle; the sample byte is read on the first get frame at least three
+  frames on; RDY is high two frames after that read begins; the held
+  cycle runs for real. Five or seven half-steps by alignment.
+- **What the two gates taught about RDY.** Rung 3 holds a read cycle
+  when RDY is low and, released, plays the next cycle at once; the 6502
+  repository now records two more scripts from its rung 0 to pin that
+  (RDY falling inside a store's write cycle; RDY released on a phi1
+  frame), and rung 3 replays both unchanged. The 2A03's DMA units
+  differ in one respect: the held read runs once more after RDY rises,
+  because the bus comes back with RDY. `Rung` presents RDY high for
+  that cycle and feeds the core's release one cycle later, labelled.
+- The controller strobes and $4016/$4017 reads are the board's (N4);
+  a DMC fetch overlapping a sprite DMA is not exercised (the die's
+  arbitration between them is a measurement for the console layer,
+  where both can happen).
+
+### Throughput
+
+The rung with the DMA units idle costs nothing over step 4's 32.1 M
+half-cycles/s; a sprite DMA is 1,024 frames of table lookups.
+
+## N3 as it stands
+
+Steps 1 to 5 closed. The chip is `v2a03-micro`: rung 3 as the core with
+the decimal adjust disconnected and the stack pointer seeded, the APU
+authored around tables measured out of rung 0 with every timing fitted
+against rung 0's code streams, the two DMA units authored from frame
+measurements, the whole held to the switch-level chip at the pins and at
+the five output codes. About 9x real time. Carried: the reset hold
+(step 2), `$4015` reads, and a DMC fetch inside a sprite DMA.
