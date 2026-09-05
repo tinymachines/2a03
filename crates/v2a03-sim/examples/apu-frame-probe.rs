@@ -16,8 +16,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode: u8 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
     let half_steps: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(150_000);
-    // LDA #mode<<7 ; STA $4017 ; JMP spin
-    let prog = [0xa9u8, mode << 7, 0x8d, 0x17, 0x40, 0x4c, 0x05, 0x80];
+    // LDA #mode<<7 ; STA $4017 ; JMP spin. Mode 2: no write at all, the
+    // frame counter as power-on leaves it, positions from the first frame.
+    let prog = if mode == 2 { vec![0x4cu8, 0x00, 0x80] } else { vec![0xa9u8, mode << 7, 0x8d, 0x17, 0x40, 0x4c, 0x05, 0x80] };
     let mut h = Harness::new(Cpu::power_on());
     h.load(0x8000, &prog, 0x8000);
     let nl = h.cpu.engine.netlist().clone();
@@ -33,15 +34,18 @@ fn main() {
     let mut prev = [false; 5];
     let mut prev_irq = false;
     let mut prev_w = false;
-    let mut lfsr_at_write = 0u32;
-    println!("mode {mode} ({}-step): phase rises as CPU cycles after the $4017 write cycle", if mode == 0 { 4 } else { 5 });
+    println!("mode {mode} ({}): phase rises as CPU cycles after the $4017 write cycle", match mode { 0 => "4-step", 1 => "5-step", _ => "no write, power-on state" });
+    if mode == 2 {
+        write_at = Some(0);
+        println!("  no write: cycles counted from the first CPU half-step after power_on (the pin contract's h=0 is 17 phases later)");
+    }
     for step in 0..half_steps {
         h.half_step();
         let w = h.cpu.engine.is_high(w4017);
         if w && !prev_w {
             // The write strobe: the bus cycle that wrote $4017.
             write_at = Some(step);
-            lfsr_at_write = bits(&h, &lfsr);
+            let lfsr_at_write = bits(&h, &lfsr);
             println!(
                 "  $4017 write strobe at half-step {step} (ab={:04x} rw={}), seqmode={} intmode={} lfsr={lfsr_at_write:015b}",
                 bits(&h, &ab),

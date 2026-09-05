@@ -13,6 +13,18 @@ the milestone log starts at `docs/a0-report.md`.
 
 ## Status
 
+N3 step 3 (the APU probes) is closed (`docs/n3-report.md`): eleven
+headless measurements off rung 0, kept as examples, are the instruments
+step 4's tables and datapath are authored from: the frame sequencer's
+positions in both modes and at power-on, the die's 32-entry length
+table (every entry the published value minus one), the four duty
+sequences, the envelope and sweep clocks (the two squares' negate
+arithmetic differ, as published, and measured), the triangle's 32
+steps, the noise period table (**index 12 measures 964 cycles where
+every published table says 762**, the one disagreement, named), the
+LFSR's two taps, the DMC's rate table and fetch stalls, the sprite DMA's
+513.5/514.5-cycle stall by alignment, and the controller strobes.
+
 N3 step 2 (the core rung) is closed with one item carried
 (`docs/n3-report.md`): `v2a03-micro` presents the 6502's rung 3 as this
 chip's core, configured by exactly the two knobs the divergence list
@@ -132,6 +144,17 @@ REQUIRE_PINS=1 cargo test --release -p v2a03-micro --test core
                                      # MUTATE=1 reconnects the decimal adjust
                                      # and the three decimal chains go red
 cargo run --release -p v2a03-micro --example bench   # the core rung beside rung 0
+cargo run --release -p v2a03-sim --example apu-frame-probe -- 0     # the frame
+                                     # sequencer: 0 = 4-step, 1 = 5-step,
+                                     # 2 = no $4017 write (power-on position)
+cargo run --release -p v2a03-sim --example apu-length-probe # the 32-entry length table
+cargo run --release -p v2a03-sim --example apu-dma-probe    # $4014: RDY, the 256 pairs,
+                                     # the stall at two alignments
+cargo run --release -p v2a03-sim --example apu-channel-probe -- duty env sweep tri noise dmc io
+                                     # the channels: duty sequences, envelope,
+                                     # sweep, triangle, noise table and taps,
+                                     # DMC table and fetch, controller strobes
+                                     # (about two minutes for all seven)
 cargo run --release -p v2a03-sim --example lockstep-probe   # every trace, every
                                      # differing field classified: the
                                      # measurement the gate's rules are from
