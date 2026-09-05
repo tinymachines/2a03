@@ -29,10 +29,35 @@
 //! RDY high for that cycle while the core's release is fed one cycle
 //! later than the pin's rise.
 
-use v6502_micro::machine::MicroCpu;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use v6502_micro::machine::{MicroBus, MicroCpu};
 use v6502_pins::{Load, PinEngine, PinFrame};
 
 use crate::apu::Apu;
+
+/// The core's bus as this chip presents it to the world: $4015 answered
+/// by the APU (its status), everything else the console's. APU register
+/// writes reach the APU from the core's own frames (the fitted timing),
+/// so writes pass straight out and the board ignores the ones that are
+/// this chip's.
+struct RungBus {
+    outer: Rc<RefCell<Box<dyn MicroBus>>>,
+    apu: Rc<RefCell<Apu>>,
+}
+
+impl MicroBus for RungBus {
+    fn read(&mut self, a: u16) -> u8 {
+        if a == 0x4015 {
+            return self.apu.borrow_mut().read_status();
+        }
+        self.outer.borrow_mut().read(a)
+    }
+    fn write(&mut self, a: u16, v: u8) {
+        self.outer.borrow_mut().write(a, v);
+    }
+}
 
 /// A sprite DMA in flight.
 #[derive(Clone, Copy, Debug)]
@@ -64,7 +89,7 @@ struct DmcFetch {
 
 pub struct Rung {
     pub core: MicroCpu,
-    pub apu: Apu,
+    pub apu: Rc<RefCell<Apu>>,
     /// Test-only: the sprite DMA moves this many pairs, 256 on the die.
     /// The stall gate's MUTATE=1 sets 255 and must go red at the last
     /// pair; setting it anywhere else is a bug by name.
@@ -77,13 +102,49 @@ pub struct Rung {
     loads: Vec<Load>,
     reset_vector: u16,
     stack_at_h0: u8,
+    /// The console's bus, shared with each core's `RungBus`.
+    outer: Option<Rc<RefCell<Box<dyn MicroBus>>>>,
 }
 
 impl Rung {
     pub fn new(loads: &[Load], reset_vector: u16, stack_at_h0: u8) -> Rung {
         let core = crate::core(loads, reset_vector, stack_at_h0);
         let frame = core.pins();
-        Rung { core, apu: Apu::new(), dma_pairs: 256, h: 0, dma: None, fetch: None, frame, loads: loads.to_vec(), reset_vector, stack_at_h0 }
+        Rung { core, apu: Rc::new(RefCell::new(Apu::new())), dma_pairs: 256, h: 0, dma: None, fetch: None, frame, loads: loads.to_vec(), reset_vector, stack_at_h0, outer: None }
+    }
+
+    /// The chip on a console's bus: every read and write the core makes
+    /// goes to `bus` (except $4015, this chip's own), the DMA units read
+    /// and write through it, and the reset vector comes from it. There is
+    /// no flat image; `power_cycle` rebuilds the core on the same bus.
+    pub fn with_bus(bus: Box<dyn MicroBus>, stack_at_h0: u8) -> Rung {
+        let mut r = Rung {
+            core: MicroCpu::new(),
+            apu: Rc::new(RefCell::new(Apu::new())),
+            dma_pairs: 256,
+            h: 0,
+            dma: None,
+            fetch: None,
+            frame: PinFrame::default(),
+            loads: Vec::new(),
+            reset_vector: 0,
+            stack_at_h0,
+            outer: Some(Rc::new(RefCell::new(bus))),
+        };
+        r.power_cycle();
+        r
+    }
+
+    /// The console's bus, for a host that wants to reach its own board
+    /// through the same object the core reads (the APU's $4015 excepted).
+    pub fn bus(&self) -> Option<Rc<RefCell<Box<dyn MicroBus>>>> {
+        self.outer.clone()
+    }
+
+    fn build_on_bus(&mut self) {
+        let outer = self.outer.as_ref().expect("a bus").clone();
+        self.apu = Rc::new(RefCell::new(Apu::new()));
+        self.core = crate::core_on_bus(Box::new(RungBus { outer, apu: self.apu.clone() }), self.stack_at_h0);
     }
 
     /// The four-frame grain the DMA units live on: get cycles begin on
@@ -95,8 +156,12 @@ impl Rung {
 
 impl PinEngine for Rung {
     fn power_cycle(&mut self) {
-        self.core = crate::core(&self.loads, self.reset_vector, self.stack_at_h0);
-        self.apu = Apu::new();
+        if self.outer.is_some() {
+            self.build_on_bus();
+        } else {
+            self.core = crate::core(&self.loads, self.reset_vector, self.stack_at_h0);
+            self.apu = Rc::new(RefCell::new(Apu::new()));
+        }
         self.h = 0;
         self.dma = None;
         self.fetch = None;
@@ -129,13 +194,16 @@ impl PinEngine for Rung {
                     d.page = f.db;
                 }
             } else {
-                self.apu.write((f.ab & 0x1f) as u8, f.db);
+                self.apu.borrow_mut().write((f.ab & 0x1f) as u8, f.db);
             }
         }
-        self.apu.half_step(&self.core.mem);
+        {
+            let core = &mut self.core;
+            self.apu.borrow_mut().half_step(&mut |a| core.bus_read(a));
+        }
         // A DMC fetch the APU performed this frame becomes a stall: RDY
         // falls one frame on (six from the enable write's frame).
-        if let Some((addr, from_enable)) = self.apu.dmc.fetched.take() {
+        if let Some((addr, from_enable)) = self.apu.borrow_mut().dmc.fetched.take() {
             let request = h + if from_enable { 6 } else { 1 };
             self.fetch = Some(DmcFetch { addr, request, read: None, done: None });
         }
@@ -152,7 +220,7 @@ impl PinEngine for Rung {
                     (Some(r), None) => {
                         f.rdy = false;
                         f.ab = fe.addr;
-                        f.db = self.core.mem[fe.addr as usize];
+                        f.db = self.core.bus_read(fe.addr);
                         f.rw = true;
                         if h == r + 1 {
                             fe.done = Some(h);
@@ -203,7 +271,7 @@ impl PinEngine for Rung {
                     let src = ((d.page as u16) << 8) | pair as u16;
                     match i % 4 {
                         0 => {
-                            d.byte = self.core.mem[src as usize];
+                            d.byte = self.core.bus_read(src);
                             f.ab = src;
                             f.db = d.byte;
                             f.rw = true;
@@ -213,10 +281,17 @@ impl PinEngine for Rung {
                             f.db = d.byte;
                             f.rw = true;
                         }
-                        _ => {
+                        2 => {
                             f.ab = 0x2004;
                             f.db = d.byte;
                             f.rw = false;
+                        }
+                        _ => {
+                            // The put cycle's phi2: the byte lands.
+                            f.ab = 0x2004;
+                            f.db = d.byte;
+                            f.rw = false;
+                            self.core.bus_write(0x2004, d.byte);
                         }
                     }
                     if i % 4 == 3 && pair + 1 == self.dma_pairs {

@@ -132,7 +132,7 @@ fn rung_codes(loads: &[Load]) -> Vec<([u8; 5], bool)> {
         if !f.rw && f.clk0 && (0x4000..=0x4017).contains(&f.ab) {
             apu.write((f.ab & 0x1f) as u8, f.db);
         }
-        apu.half_step(&core.mem);
+        apu.half_step(&mut |a| core.mem[a as usize]);
         out.push((apu.codes(), apu.frame_irq));
     }
     out

@@ -472,7 +472,7 @@ impl Dmc {
             _ => self.sample_len = ((v as u16) << 4) | 1,
         }
     }
-    fn set_enabled(&mut self, on: bool, mem: &[u8]) {
+    fn set_enabled(&mut self, on: bool, read: &mut dyn FnMut(u16) -> u8) {
         self.enabled = on;
         if on {
             if self.remaining == 0 {
@@ -480,7 +480,7 @@ impl Dmc {
                 self.remaining = self.sample_len;
             }
             if self.buffer.is_none() {
-                self.fetch(mem);
+                self.fetch(read);
                 if let Some(f) = self.fetched.as_mut() {
                     f.1 = true;
                 }
@@ -489,12 +489,12 @@ impl Dmc {
             self.remaining = 0;
         }
     }
-    fn fetch(&mut self, mem: &[u8]) {
+    fn fetch(&mut self, read: &mut dyn FnMut(u16) -> u8) {
         if self.remaining == 0 {
             return;
         }
         self.fetched = Some((self.addr, false));
-        self.buffer = Some(mem[self.addr as usize]);
+        self.buffer = Some(read(self.addr));
         self.addr = if self.addr == 0xffff { 0x8000 } else { self.addr + 1 };
         self.remaining -= 1;
         if self.remaining == 0 {
@@ -513,7 +513,7 @@ impl Dmc {
     /// output moves by the bit shifted out unless silent, the shifter
     /// shifts, the bit counter wraps, and at the wrap the buffer (if
     /// full) becomes the next byte and its refill is fetched.
-    fn half_step(&mut self, mem: &[u8]) {
+    fn half_step(&mut self, read: &mut dyn FnMut(u16) -> u8) {
         if !self.timer.half_step() {
             return;
         }
@@ -533,7 +533,7 @@ impl Dmc {
                 Some(b) => {
                     self.silence = false;
                     self.shifter = b;
-                    self.fetch(mem);
+                    self.fetch(read);
                 }
                 None => self.silence = true,
             }
@@ -606,7 +606,7 @@ impl Apu {
         self.pending = Some((reg, v));
     }
 
-    fn apply(&mut self, reg: u8, v: u8, mem: &[u8]) {
+    fn apply(&mut self, reg: u8, v: u8, read: &mut dyn FnMut(u16) -> u8) {
         match reg {
             0x00..=0x03 => self.sq[0].write(reg, v),
             0x04..=0x07 => self.sq[1].write(reg, v),
@@ -618,7 +618,7 @@ impl Apu {
                 self.sq[1].len.set_enabled(v & 2 != 0);
                 self.tri.len.set_enabled(v & 4 != 0);
                 self.noise.len.set_enabled(v & 8 != 0);
-                self.dmc.set_enabled(v & 0x10 != 0, mem);
+                self.dmc.set_enabled(v & 0x10 != 0, read);
                 self.dmc.irq = false;
             }
             0x17 => {
@@ -674,10 +674,11 @@ impl Apu {
         self.noise.len.half();
     }
 
-    /// One CPU half-cycle.
-    pub fn half_step(&mut self, mem: &[u8]) {
+    /// One CPU half-cycle. `read` is the CPU bus as the DMC's sample
+    /// fetch sees it (the console's, or a flat image in the gates).
+    pub fn half_step(&mut self, read: &mut dyn FnMut(u16) -> u8) {
         if let Some((reg, v)) = self.pending.take() {
-            self.apply(reg, v, mem);
+            self.apply(reg, v, read);
         }
         // The frame sequencer: the table's phase rises at their measured
         // offsets, repeating on the period.
@@ -754,7 +755,7 @@ impl Apu {
             self.dmc.tick();
         }
         self.noise.half_step();
-        self.dmc.half_step(mem);
+        self.dmc.half_step(read);
         self.sq_lag[(self.h as usize) % 4] = [self.sq[0].out(), self.sq[1].out(), self.noise.out()];
         self.h += 1;
     }

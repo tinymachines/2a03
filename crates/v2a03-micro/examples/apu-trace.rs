@@ -37,7 +37,7 @@ fn main() {
         if wrote {
             apu.write((f.ab & 0x1f) as u8, f.db);
         }
-        apu.half_step(&core.mem);
+        apu.half_step(&mut |a| core.mem[a as usize]);
         if h + 1 >= from {
             println!("h={:>4} clk0={} ab={:04x} db={:02x} rw={}{} codes={:?} sq1={:?}", h + 1, f.clk0 as u8, f.ab, f.db, f.rw as u8, if wrote { " WRITE" } else { "" }, apu.codes(), apu.sq[1]);
         }

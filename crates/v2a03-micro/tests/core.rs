@@ -102,6 +102,7 @@ fn the_core_rung_matches_rung_0_on_every_program_but_the_write_phi1_byte() {
             None => s_seen = Some(s),
             Some(x) => assert_eq!(x, s, "{name}: rung 0's S at h=0 changed between programs"),
         }
+        assert_eq!(s, v2a03_micro::STACK_AT_H0_MEASURED, "the constant a console seeds from must be what rung 0 shows");
         let want = run(&mut r0, steps, &stim);
         assert!(!r0.absent_pin_driven && !r0.clock_stopped, "{name}: rung 0 refused or stopped");
         // The core rung, seeded from that measurement.

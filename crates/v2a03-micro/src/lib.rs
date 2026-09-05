@@ -29,13 +29,30 @@ pub mod tables {
     include!(concat!(env!("OUT_DIR"), "/tables.rs"));
 }
 
-use v6502_micro::machine::MicroCpu;
+use v6502_micro::machine::{MicroBus, MicroCpu};
 use v6502_pins::Load;
 
 /// The core as this die presents it: rung 3 with the adjust disconnected
 /// and S seeded. `stack_at_h0` is measured off rung 0's register nodes
 /// (`v2a03_sim::pins::CorePins::stack_pointer` after `power_cycle`), never
 /// typed; passing a typed number is a bug by name.
+/// The stack pointer at the pin contract's h=0, read off rung 0's s0..s7
+/// register nodes (`tests/core.rs` reads it every run and holds this
+/// constant to it, so a console that has no rung 0 of its own can seed
+/// the core with a measurement rather than a number).
+pub const STACK_AT_H0_MEASURED: u8 = 0xbd;
+
+/// The same core on a bus a console provides (`MicroBus`): no flat
+/// image, the reset vector read through the bus like everything else.
+pub fn core_on_bus(bus: Box<dyn MicroBus>, stack_at_h0: u8) -> MicroCpu {
+    let mut m = MicroCpu::new();
+    m.set_decimal_adjust(false);
+    m.set_stack_at_h0(Some(stack_at_h0));
+    m.bus = Some(bus);
+    v6502_pins::PinEngine::power_cycle(&mut m);
+    m
+}
+
 pub fn core(loads: &[Load], reset_vector: u16, stack_at_h0: u8) -> MicroCpu {
     let mut m = MicroCpu::new();
     m.set_decimal_adjust(false);

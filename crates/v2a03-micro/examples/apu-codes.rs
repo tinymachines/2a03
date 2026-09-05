@@ -26,7 +26,7 @@ fn main() {
         if !f.rw && f.clk0 && (0x4000..=0x4017).contains(&f.ab) {
             apu.write((f.ab & 0x1f) as u8, f.db);
         }
-        apu.half_step(&core.mem);
+        apu.half_step(&mut |a| core.mem[a as usize]);
         let c = apu.codes();
         println!("{h},{},{},{},{},{},{}", c[0], c[1], c[2], c[3], c[4], apu.frame_irq as u8);
     }

@@ -67,7 +67,7 @@ fn main() {
             if !f.rw && f.clk0 && (0x4000..=0x4017).contains(&f.ab) {
                 apu.write((f.ab & 0x1f) as u8, f.db);
             }
-            apu.half_step(&m.mem);
+            apu.half_step(&mut |a| m.mem[a as usize]);
         }
         best_apu = best_apu.max(n_rung as f64 / t.elapsed().as_secs_f64());
         std::hint::black_box(apu.codes());
