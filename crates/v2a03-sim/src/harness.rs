@@ -72,12 +72,25 @@ impl Harness {
     /// One CPU half step: master toggles until clk0 flips, then the bus
     /// reacts, the reference's halfStep order.
     pub fn half_step(&mut self) {
+        assert!(self.half_step_bounded(1 << 16), "clk0 stopped: the divider did not flip in 65,536 master pulses");
+    }
+
+    /// `half_step` with a ceiling on the master pulses spent waiting for
+    /// clk0 to flip; false if it never did (a divider held in reset would
+    /// otherwise spin this loop forever, and a caller driving the reset
+    /// pin mid-run wants the fact, not a hang).
+    pub fn half_step_bounded(&mut self, max_master_pulses: u32) -> bool {
         let clk = self.cpu.engine.is_high(self.cpu.sig.clk0);
+        let mut spent = 0u32;
         loop {
             self.cpu.engine.drive_high(self.cpu.sig.clk_in);
             self.cpu.engine.drive_low(self.cpu.sig.clk_in);
             if self.cpu.engine.is_high(self.cpu.sig.clk0) != clk {
                 break;
+            }
+            spent += 1;
+            if spent >= max_master_pulses {
+                return false;
             }
         }
         if clk {
@@ -86,6 +99,7 @@ impl Harness {
             self.bus_write();
         }
         self.half_steps += 1;
+        true
     }
 
     fn bus_read(&mut self) {

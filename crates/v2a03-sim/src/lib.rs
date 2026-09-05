@@ -19,7 +19,9 @@
 //! both models and need nothing.
 
 pub mod harness;
+pub mod lockstep;
 pub mod mixer;
+pub mod pins;
 
 use std::sync::Arc;
 

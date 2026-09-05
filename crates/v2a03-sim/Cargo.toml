@@ -9,7 +9,7 @@ description = "The 2A03 as a running machine: power-on and the reference's reset
 halfphi = { git = "https://github.com/tinymachines/halfphi", tag = "v0.1.6" }
 nes-bus = { git = "https://github.com/tinymachines/nes-bus", tag = "v0.1.1" }
 v2a03-netlist = { path = "../v2a03-netlist" }
-
-[dev-dependencies]
-v6502-pins = { git = "https://github.com/tinymachines/6502", package = "v6502-pins", rev = "8db7fa4" }
+# The 6502 pin contract (MIT, no die data, no engine): the core is presented
+# through it, and the cross-chip gate reads recorded traces in its format.
+v6502-pins = { git = "https://github.com/tinymachines/6502", package = "v6502-pins", rev = "dc2dada" }
 

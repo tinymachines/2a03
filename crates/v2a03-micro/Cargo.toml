@@ -1,0 +1,20 @@
+[package]
+name = "v2a03-micro"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "The 2A03's ladder rung: the 6502's rung 3 as this chip's core (decimal adjust disconnected, stack pointer seeded from this die), and the APU as tables measured out of rung 0."
+
+# The core is the 6502 repository's rung 3, a git dependency pinned by
+# revision: its control table is measured out of the 6502's rung 0 at
+# build time in that crate's build.rs (NC-SA-derived, never committed),
+# and the two knobs this chip needs landed there under its own golden
+# (tests/knobs.rs at this revision). v6502-pins is pinned at the same
+# revision so the contract cannot drift between the two.
+[dependencies]
+v6502-micro = { git = "https://github.com/tinymachines/6502", package = "v6502-micro", rev = "dc2dada" }
+v6502-pins = { git = "https://github.com/tinymachines/6502", package = "v6502-pins", rev = "dc2dada" }
+
+[dev-dependencies]
+v2a03-sim = { path = "../v2a03-sim" }
+v2a03-netlist = { path = "../v2a03-netlist" }

@@ -13,16 +13,47 @@ the milestone log starts at `docs/a0-report.md`.
 
 ## Status
 
-The pin-lockstep gate's chip side is in place: the 2A03's 6502 core is
-presented at the pins as a `v6502-pins` `PinFrame` (one per clk0 phase,
-the 6502's own half-cycle) and held to what a 6502 must do there, the
-reset vector fetched from $FFFC/$FFFD, execution entered at the vector,
-opcode fetches marked by sync, a store landing as a write. It depends
-on the `v6502-pins` contract alone (MIT, no die data), never on a 6502
-engine: a chip crate does not know what is on the other side of its
-pins. The cross-chip comparison against a recorded 6502 trace, and the
-decimal-mode divergence, are the second half and belong to the console
-layer where both chips are reachable.
+N3 step 2 (the core rung) is closed with one item carried
+(`docs/n3-report.md`): `v2a03-micro` presents the 6502's rung 3 as this
+chip's core, configured by exactly the two knobs the divergence list
+justified (the decimal adjust disconnected, the stack pointer seeded
+from this chip's own rung 0 nodes), nothing else authored. Every
+recorded 6502 program and script runs on rung 0 and on the core rung
+under the same replay: **272 programs, 52,048 half-cycles, 133 exact in
+every field, 457 write-phi1 bytes differing and nothing else**, the
+decimal chains agreeing outright. **32.8 M half-cycles/s, about 3,349x
+rung 0 and 9.2x the 2A03's real time.** `MUTATE=1` leaves the adjust
+connected and the three decimal chains go red by name. Carried: the
+2A03 holds its core still under a mid-run RES where the 6502 runs on;
+the rung plays the 6502's, the gate lists that one script as diverging
+inside the reset window, and the hold is to be measured and authored as
+a third knob.
+
+N3 step 1 (the divergence list) is closed (`docs/n3-plan.md`,
+`docs/n3-report.md`): the pin-lockstep gate's second half, chip against
+chip. The 2A03's core runs every one of the 6502 repository's 274
+recorded pin traces through the contract's own replay (`v6502-pins`
+alone; the other chip enters as recorded text, never as an engine), and
+**272 traces compare, 130 exact in every field at every half-cycle, the
+rest differing only inside four named and bounded classes**: the stack
+page (the two dies' simulated power-on stack pointers differ by $40,
+derived from both cores' own registers), the data byte in a write's
+phi1 half (nothing is serviced there), the three decimal chains (the
+2A03 stores the binary sums and binary flags where the 6502 adjusts,
+nine bytes listed with their arithmetic), and the reset-mid-run script
+(the 2A03 holds its core still under RES where the 6502 runs on; both
+read the vector at the same half-cycle). Two scripts drive pins the
+2A03 does not have and are refused by name. `MUTATE=1` flips one
+serviced bit and goes red as an unnamed difference. The list decided the
+core rung's shape: `v6502-micro` with its decimal adjust disconnected
+and its stack pointer seeded from this chip, both knobs landed in the
+6502 repository and held to its golden there.
+
+The pin-lockstep gate's chip side (N1) is in place: the 2A03's 6502 core
+is presented at the pins as a `v6502-pins` `PinFrame` (one per clk0
+phase, the 6502's own half-cycle) and held to what a 6502 must do there,
+the reset vector fetched from $FFFC/$FFFD, execution entered at the
+vector, opcode fetches marked by sync, a store landing as a write.
 
 A3 (first sound) is closed on top of A0: the memory harness runs the
 authored square-note program on the chip, the reference's own run of
@@ -64,7 +95,8 @@ means most of the core stands still per master tick).
 | Crate | Role |
 |---|---|
 | `v2a03-netlist` | The die data parsed by halfphi at build time and embedded; builds data-free with a loud refusal when the extern is not fetched. |
-| `v2a03-sim` | Power-on and the reference's reset recipe, master half-stepping, the node dump the golden comparison rides on, the memory harness, and the authored mixer. |
+| `v2a03-micro` | The ladder rung: `v6502-micro` (a git dependency pinned by revision; its table measured out of the 6502's rung 0 at build time) as this chip's core, and the APU as tables to follow. |
+| `v2a03-sim` | Power-on and the reference's reset recipe, master half-stepping, the node dump the golden comparison rides on, the memory harness, the core at the `v6502-pins` contract with the cross-chip classifier, and the authored mixer. |
 
 ## Commands
 
@@ -76,18 +108,36 @@ cargo test --workspace --release     # counts, convergence, the goldens,
                                      # tests SKIP by name without the extern
                                      # or the golden; REQUIRE_NETLIST=1 /
                                      # REQUIRE_GOLDEN=1 insist
-MUTATE=1 cargo test --workspace --release   # must go red three ways: the
+MUTATE=1 cargo test --workspace --release   # must go red five ways: the
                                      # supply-gated fix-up off (A0 replay
                                      # diverges at step 0), the timer byte
                                      # served wrong (A3 replay and plateau
-                                     # both), and R/W's polarity flipped in
-                                     # the extracted pin frame (the vector
-                                     # fetch fails its read check)
-cargo test --release -p v2a03-sim --test pin_lockstep
-                                     # the pin-lockstep gate, chip side: the
+                                     # both), R/W's polarity flipped in the
+                                     # extracted pin frame (the vector fetch
+                                     # fails its read check), one serviced bit
+                                     # flipped in the cross-chip replay, and
+                                     # the core rung's decimal adjust left on
+REQUIRE_PINS=1 cargo test --release -p v2a03-sim --test pin_lockstep
+                                     # the pin-lockstep gate, both halves: the
                                      # core as a v6502-pins PinFrame per clk0
-                                     # phase, held to a conformant 6502's
-                                     # reset vector, sync and store
+                                     # phase held to a conformant 6502, then
+                                     # every recorded 6502 trace replayed
+                                     # through it with the four divergences
+                                     # named (reads ../6502/tools/pin-golden,
+                                     # or PIN_GOLDEN=<dir>; SKIPS without)
+REQUIRE_PINS=1 cargo test --release -p v2a03-micro --test core
+                                     # N3 step 2: the core rung against rung 0
+                                     # on every recorded program and script,
+                                     # every field but the write-phi1 byte;
+                                     # MUTATE=1 reconnects the decimal adjust
+                                     # and the three decimal chains go red
+cargo run --release -p v2a03-micro --example bench   # the core rung beside rung 0
+cargo run --release -p v2a03-sim --example lockstep-probe   # every trace, every
+                                     # differing field classified: the
+                                     # measurement the gate's rules are from
+cargo run --release -p v2a03-sim --example reset-probe      # RES held 8..96 phases
+                                     # mid-run: the 2A03's held core beside
+                                     # the 6502's recording
 node tools/golden-trace/gen.js       # regenerate the A0 golden
                                      # (601 states, about 5 s)
 node tools/golden-trace/gen-a3.js    # regenerate the A3 golden (2,001

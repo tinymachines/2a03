@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["crates/v2a03-netlist", "crates/v2a03-sim"]
+members = ["crates/v2a03-netlist", "crates/v2a03-sim", "crates/v2a03-micro"]
