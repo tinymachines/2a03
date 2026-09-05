@@ -197,6 +197,10 @@ cargo run --release -p v2a03-micro --example bench   # the core rung, alone and
                                      # with the APU, beside rung 0
 cargo run --release -p v2a03-micro --example apu-trace -- 100 140
                                      # the authored APU's state per half-step
+cargo run --release -p v2a03-micro --example apu-codes -- 80000 > codes.csv
+python3 tools/apu-figure.py codes.csv apu-codes.png
+                                     # the five output codes over the gate's
+                                     # long-note world, as a figure
 cargo run --release -p v2a03-sim --example apu-frame-probe -- 0     # the frame
                                      # sequencer: 0 = 4-step, 1 = 5-step,
                                      # 2 = no $4017 write (power-on position)
