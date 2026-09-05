@@ -89,7 +89,7 @@ impl Rung {
     /// The four-frame grain the DMA units live on: get cycles begin on
     /// frames with h = 0 mod 4 (measured: every DMA read lands there).
     fn is_get(h: u64) -> bool {
-        h % 4 == 0
+        h.is_multiple_of(4)
     }
 }
 
