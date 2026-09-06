@@ -40,3 +40,15 @@ pub fn ad2(tri: u8, noi: u8, pcm: u8) -> f32 {
     }
     (159.79 / (1.0 / inner + 100.0)) as f32
 }
+
+/// The page's linear approximation of `ad1`, for the mutation that
+/// proves the console's mixer gate can tell the nonlinear table from
+/// a straight line (nes, tests/sound.rs). Not for mixing.
+pub fn ad1_linear(sq0: u8, sq1: u8) -> f32 {
+    0.00752 * (sq0 + sq1) as f32
+}
+
+/// The page's linear approximation of `ad2`; see `ad1_linear`.
+pub fn ad2_linear(tri: u8, noi: u8, pcm: u8) -> f32 {
+    0.00851 * tri as f32 + 0.00494 * noi as f32 + 0.00335 * pcm as f32
+}
