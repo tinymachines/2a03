@@ -1,0 +1,8 @@
+[package]
+name = "v2a03-dac"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "The 2A03's two audio DACs as the nesdev wiki's mixer table: five output codes to the two pins' levels. Authored, labelled, no dependencies, so the console can reach it without the switch-level crates."
+
+[dependencies]

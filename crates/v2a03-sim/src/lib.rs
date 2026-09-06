@@ -20,7 +20,10 @@
 
 pub mod harness;
 pub mod lockstep;
-pub mod mixer;
+/// The DAC table, A3's name for it: `v2a03-dac`, re-exported.
+pub mod mixer {
+    pub use v2a03_dac::*;
+}
 pub mod pins;
 
 use std::sync::Arc;

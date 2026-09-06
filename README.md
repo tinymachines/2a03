@@ -149,7 +149,8 @@ means most of the core stands still per master tick).
 |---|---|
 | `v2a03-netlist` | The die data parsed by halfphi at build time and embedded; builds data-free with a loud refusal when the extern is not fetched. |
 | `v2a03-micro` | The ladder rung: `v6502-micro` (a git dependency pinned by revision; its table measured out of the 6502's rung 0 at build time) as this chip's core, the APU authored around tables measured out of this chip's rung 0 at build time (`build.rs`, about a minute), and `Rung`, the whole chip at the pin contract with its DMA units. |
-| `v2a03-sim` | Power-on and the reference's reset recipe, master half-stepping, the node dump the golden comparison rides on, the memory harness, the core at the `v6502-pins` contract with the cross-chip classifier, and the authored mixer. |
+| `v2a03-sim` | Power-on and the reference's reset recipe, master half-stepping, the node dump the golden comparison rides on, the memory harness, the core at the `v6502-pins` contract with the cross-chip classifier, and the authored mixer (re-exported from `v2a03-dac`). |
+| `v2a03-dac` | The two audio DACs as the nesdev wiki's mixer table, authored and labelled, with no dependencies: what the console's sound (N7) mixes through. Read against the NES-001 schematic, the table's "+100" is the board's pulldowns and its two numerators are in the board's summing-resistor ratio. |
 
 ## Commands
 

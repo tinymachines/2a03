@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/v2a03-netlist", "crates/v2a03-sim", "crates/v2a03-micro"]
+members = ["crates/v2a03-dac", "crates/v2a03-netlist", "crates/v2a03-sim", "crates/v2a03-micro"]
 
 # The build scripts run rung 0 (v2a03-micro records its APU tables off the
 # switch-level chip); unoptimised they would take many times longer.

@@ -34,7 +34,7 @@ program's 144.
   cycles, four steps high of eight at this duty). The netlist
   proposed; the measurement disposed; they agree to the half-step.
 - **First sound as a value**: the run mixed through the authored
-  nesdev table (`src/mixer.rs`) into nes-bus's `AudioSamples`, one
+  nesdev table (`src/mixer.rs` then; `v2a03-dac` since N7, re-exported) into nes-bus's `AudioSamples`, one
   sample per CPU half-step at the exact rational rate. AD1 is
   two-valued, silence and ad1(15, 0); AD2 stays silent.
 
