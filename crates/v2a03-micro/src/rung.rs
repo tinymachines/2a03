@@ -49,13 +49,26 @@ struct RungBus {
 
 impl MicroBus for RungBus {
     fn read(&mut self, a: u16) -> u8 {
-        if a == 0x4015 {
-            return self.apu.borrow_mut().read_status();
-        }
+        // $4015 is answered inside the chip, so the external data bus
+        // shows whatever the world drives there (the memory harness's
+        // byte in the gates, open bus on a console); the byte the core
+        // latches comes through `read_late`.
         self.outer.borrow_mut().read(a)
     }
     fn write(&mut self, a: u16, v: u8) {
         self.outer.borrow_mut().write(a, v);
+    }
+    fn peek(&mut self, a: u16) -> u8 {
+        self.outer.borrow_mut().peek(a)
+    }
+    fn read_late(&mut self, a: u16) -> Option<u8> {
+        if a == 0x4015 {
+            // The byte as the core latches it at the end of phi2: the
+            // APU one half-step on (`Apu::read_status_sampled`).
+            let outer = self.outer.clone();
+            return Some(self.apu.borrow_mut().read_status_sampled(&mut |a| outer.borrow_mut().read(a)));
+        }
+        self.outer.borrow_mut().read_late(a)
     }
 }
 

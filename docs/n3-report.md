@@ -363,7 +363,8 @@ attached, so nothing is built for speed.
   the sprite DMA 1027 or 1029; the rung's core does not yet see them.
 - The reset hold from step 2.
 - `$4015` reads, and the frame IRQ's clear on that read, are authored
-  and unexercised: the gate's programs never read.
+  and unexercised: the gate's programs never read. (Closed 2026-09-06:
+  `tests/reads.rs`; the note in the README.)
 
 ## Step 5: the stalls (closed 2026-09-05)
 
@@ -429,4 +430,5 @@ authored around tables measured out of rung 0 with every timing fitted
 against rung 0's code streams, the two DMA units authored from frame
 measurements, the whole held to the switch-level chip at the pins and at
 the five output codes. About 9x real time. Carried: the reset hold
-(step 2), `$4015` reads, and a DMC fetch inside a sprite DMA.
+(step 2), `$4015` reads (closed 2026-09-06, `tests/reads.rs`), and a
+DMC fetch inside a sprite DMA.

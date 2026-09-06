@@ -567,6 +567,9 @@ pub struct Apu {
     /// Half-steps the sequencer still waits before `frame_pos` moves
     /// (the other write parity's jitter).
     frame_hold: u32,
+    /// A sampled status read clears the frame IRQ flag at the end of
+    /// the half-step it sampled.
+    irq_clear_pending: bool,
     five_step: bool,
     irq_inhibit: bool,
     pub frame_irq: bool,
@@ -605,6 +608,7 @@ impl Apu {
             dmc: Dmc::default(),
             frame_pos: fit::frame_pos_at_h0(),
             frame_hold: 0,
+            irq_clear_pending: false,
             five_step: false,
             irq_inhibit: false,
             frame_irq: false,
@@ -668,9 +672,35 @@ impl Apu {
         }
     }
 
-    /// $4015 as read: the length counters' states, the two IRQ flags.
-    /// Reading clears the frame IRQ flag.
+    /// $4015 as the CPU samples it: the core asks its bus on the read
+    /// cycle's phi1, and the chip latches the byte at the end of that
+    /// cycle's phi2, one half-step on, by which time a frame IRQ flag or
+    /// a length expiry falling in that half-step is in it (MEASURED:
+    /// `tests/reads.rs`, the whole chip against rung 0 with the read
+    /// stepped a cycle at a time across both events; rung 0 stored $41
+    /// from a read whose pin frame still showed $01). So the status is
+    /// read off a copy stepped once, and the flag the read clears is
+    /// cleared after this APU's own next half-step, where it may just
+    /// have been set.
+    pub fn read_status_sampled(&mut self, read: &mut dyn FnMut(u16) -> u8) -> u8 {
+        let mut ahead = *self;
+        ahead.half_step(read);
+        let v = ahead.status();
+        self.irq_clear_pending = true;
+        v
+    }
+
+    /// $4015 as read at once: the length counters' states, the two IRQ
+    /// flags. Reading clears the frame IRQ flag. The gates that feed the
+    /// APU from a bare core's frames use this; the Rung samples.
     pub fn read_status(&mut self) -> u8 {
+        let v = self.status();
+        self.frame_irq = false;
+        v
+    }
+
+    /// $4015's bits as they stand, nothing cleared.
+    pub fn status(&self) -> u8 {
         let mut v = 0u8;
         for (i, s) in self.sq.iter().enumerate() {
             if s.len.playing() && s.len.enabled {
@@ -692,7 +722,6 @@ impl Apu {
         if self.dmc.irq {
             v |= 0x80;
         }
-        self.frame_irq = false;
         v
     }
 
@@ -796,6 +825,10 @@ impl Apu {
         self.noise.half_step();
         self.dmc.half_step(read);
         self.sq_lag[(self.h as usize) % 4] = [self.sq[0].out(), self.sq[1].out(), self.noise.out()];
+        if self.irq_clear_pending {
+            self.irq_clear_pending = false;
+            self.frame_irq = false;
+        }
         self.h += 1;
     }
 

@@ -24,8 +24,15 @@ write alignments and the DMC's sample fetches against rung 0 **frame
 for frame in every field, RDY included** (1,201 + 1,201 + 4,201
 frames; RDY low on 1,029, 1,027 and 19). `MUTATE=1` shortens the DMA by
 a pair and the gate goes red. About 9x real time with everything
-attached. Carried: the reset hold (step 2), `$4015` reads, a DMC fetch
-inside a sprite DMA.
+attached. The `$4015` read joined on 2026-09-06 (`tests/reads.rs`, the
+console's apu_test results the finder): the Rung on a bus against
+rung 0 with a status read stepped a cycle at a time across the fourth
+step on both APU parities, the frame IRQ flag's rise and a length's
+expiry two half-steps apart, the byte the core latched identical at
+every point. The chip latches the status at the end of the read's
+phi2, a half-step after the core asks its bus, which the 6502's
+`MicroBus::read_late` now carries. Carried: the reset hold (step 2), a
+DMC fetch inside a sprite DMA.
 
 N3 step 4 (the APU as tables) is closed (`docs/n3-report.md`):
 `v2a03-micro` carries the APU authored around tables measured out of
@@ -189,6 +196,12 @@ cargo run --release -p v2a03-sim --example stall-probe -- dma   # the two stalls
                                      # rung 0 shows them (dma | dmc)
 cargo run --release -p v2a03-micro --example rung-trace -- 8 24  # the rung's frame
                                      # beside its core's, under the DMA
+REQUIRE_NETLIST=1 cargo test --release -p v2a03-micro --test reads
+                                     # the $4015 read latched as rung 0
+                                     # latches it: the Rung on a bus, the
+                                     # read stepped a cycle at a time across
+                                     # the fourth step, both parities;
+                                     # SURVEY=1 reports instead of holding
 REQUIRE_NETLIST=1 cargo test --release -p v2a03-micro --test apu
                                      # N3 step 4: the APU's five output codes
                                      # and the frame IRQ against rung 0 every
