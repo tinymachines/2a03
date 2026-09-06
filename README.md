@@ -34,11 +34,14 @@ sequencer's positions in both modes, and the two timers step 4 found to
 be LFSRs rather than counters, `noi_t` and `pcm_t`, with their taps,
 terminals and sixteen reload states each: the die's period ROMs, which
 is where the noise table's index 12 comes from). Held to rung 0 on two
-register programs under both frame modes: **four worlds of 80,001
-half-steps, the five output codes and the frame IRQ flag identical at
-every half-step**, envelopes, both sweep complements to their mutes,
-length and linear expiries, the noise LFSR and the DMC's byte cycle,
-loop and end included. Every timing inside a unit is a fitted constant
+register programs under both frame modes, then (2026-09-06, the
+console's apu_test results the finder) the mode written on the other APU
+cycle parity, the mode written after the notes, and no mode write at
+all: **ten worlds of 80,001 half-steps, the five output codes and the
+frame IRQ flag identical at every half-step**, envelopes, both sweep
+complements to their mutes, length and linear expiries, the noise LFSR
+and the DMC's byte cycle, loop and end, the $4017 write's jitter and
+its mode-1 immediate clock included. Every timing inside a unit is a fitted constant
 in `apu::fit`, each measured with a probe when the gate's code streams
 first parted. **32.1 M half-cycles/s with the APU attached, 9.0x real
 time.** `MUTATE=1` reverses the duty table at build time and the gate
@@ -189,10 +192,25 @@ cargo run --release -p v2a03-micro --example rung-trace -- 8 24  # the rung's fr
 REQUIRE_NETLIST=1 cargo test --release -p v2a03-micro --test apu
                                      # N3 step 4: the APU's five output codes
                                      # and the frame IRQ against rung 0 every
-                                     # half-step, two programs, both frame
-                                     # modes; APU_DUMP=1 prints both streams
-                                     # around the first divergence; MUTATE=1
-                                     # reverses the duty table (rebuilds)
+                                     # half-step, ten worlds (two programs,
+                                     # both frame modes, both write parities,
+                                     # the mode written last, no mode write);
+                                     # APU_DUMP=1 prints both streams around
+                                     # the first divergence, APU_DUMP=all the
+                                     # whole run, APU_PROG=1 each program's
+                                     # bytes; MUTATE=1 reverses the duty table
+                                     # (rebuilds) and swaps the write parity
+cargo run --release -p v2a03-sim --example apu-write-probe -- [0|1] [0|1]
+                                     # the $4017 write at both APU parities:
+                                     # the reset, the mode-1 immediate clock,
+                                     # every phase and the IRQ flag as
+                                     # half-steps after the strobe (DELAY=n
+                                     # NOPs first). The jitter's measurement
+PROG=<hex> FROM=<h> TO=<h> cargo run --release -p v2a03-sim --example apu-world-probe
+                                     # a register program on rung 0: every
+                                     # change of a square's nodes in a window
+                                     # (PINS=1 through the pin engine, as the
+                                     # gate sets the chip up)
 cargo run --release -p v2a03-micro --example bench   # the core rung, alone and
                                      # with the APU, beside rung 0
 cargo run --release -p v2a03-micro --example apu-trace -- 100 140

@@ -255,10 +255,45 @@ fn duty() -> [u8; 4] {
 
 const PHASES: [&str; 5] = ["frm_phase_a", "frm_phase_b", "frm_phase_c", "frm_phase_d", "frm_phase_e"];
 
+/// Half-steps the other write parity adds to every frame event
+/// (measured by `apu-write-probe`; asserted on every phase below).
+const FRAME_JITTER: u32 = 2;
+
+/// A mode-1 write clocks the quarter and half frames at once: the
+/// half-step after the strobe on which `frm_/half` falls (the even
+/// parity; the other is FRAME_JITTER later, asserted).
+fn mode1_clock() -> u32 {
+    let mut at = [0u32; 2];
+    for (k, odd) in [false, true].into_iter().enumerate() {
+        let mut prog: Vec<u8> = if odd { vec![0x85, 0x00] } else { Vec::new() };
+        prog.extend(w(0x17, 0x80));
+        let mut p = P::new(&prog);
+        p.until_write("w4017", 4000);
+        let mut i = 0u32;
+        loop {
+            p.step();
+            i += 1;
+            if !p.hi("frm_/half") {
+                at[k] = i;
+                break;
+            }
+            assert!(i < 100, "mode 1: the write did not clock the half frame within a hundred half-steps");
+        }
+    }
+    assert_eq!(at[1], at[0] + FRAME_JITTER, "mode 1: the immediate clock falls at {} and {} by parity, not {} apart", at[0], at[1], FRAME_JITTER);
+    at[0]
+}
+
 /// (offset, phase) rises after the write strobe until the sequence repeats
 /// (phase_a seen twice), plus the period between the two phase_a rises.
-fn frame(mode: u8) -> (Vec<(u32, u8)>, u32) {
-    let prog: Vec<u8> = if mode == 2 { Vec::new() } else { w(0x17, mode << 7).to_vec() };
+/// `odd` puts a three-cycle instruction before the write, so the write
+/// lands on the other APU cycle parity (a two-cycle NOP would not move
+/// it: an APU cycle is two CPU cycles).
+fn frame(mode: u8, odd: bool) -> (Vec<(u32, u8)>, u32) {
+    let mut prog: Vec<u8> = if odd { vec![0x85, 0x00] } else { Vec::new() };
+    if mode != 2 {
+        prog.extend(w(0x17, mode << 7));
+    }
     let mut p = P::new(&prog);
     let origin = if mode == 2 {
         // No write: measured from the pin contract's h=0, which is
@@ -303,7 +338,7 @@ fn main() {
     let mut s = String::new();
     if !v2a03_netlist::available() {
         println!("cargo:warning=v2a03-micro: extern/visual2a03 not fetched; APU tables written EMPTY, tests will SKIP");
-        s.push_str("pub const AVAILABLE: bool = false;\npub static LENGTH: [u8; 32] = [0; 32];\npub static NOISE_PERIOD: [u16; 16] = [0; 16];\npub static DMC_RATE: [u16; 16] = [0; 16];\npub static DUTY: [u8; 4] = [0; 4];\npub static FRAME_4: &[(u32, u8)] = &[];\npub static FRAME_4_PERIOD: u32 = 0;\npub static FRAME_5: &[(u32, u8)] = &[];\npub static FRAME_5_PERIOD: u32 = 0;\npub static FRAME_POWER_ON: u32 = 0;\npub static NOISE_TIMER: LfsrTimer = LfsrTimer { at_h0: 0, taps: (0, 0), terminal: 0, reload: [0; 16] };\npub static DMC_TIMER: LfsrTimer = LfsrTimer { at_h0: 0, taps: (0, 0), terminal: 0, reload: [0; 16] };\n");
+        s.push_str("pub const AVAILABLE: bool = false;\npub static LENGTH: [u8; 32] = [0; 32];\npub static NOISE_PERIOD: [u16; 16] = [0; 16];\npub static DMC_RATE: [u16; 16] = [0; 16];\npub static DUTY: [u8; 4] = [0; 4];\npub static FRAME_4: &[(u32, u8)] = &[];\npub static FRAME_4_PERIOD: u32 = 0;\npub static FRAME_5: &[(u32, u8)] = &[];\npub static FRAME_5_PERIOD: u32 = 0;\npub static FRAME_POWER_ON: u32 = 0;\npub static FRAME_JITTER: u32 = 0;\npub static MODE1_CLOCK: u32 = 0;\npub static NOISE_TIMER: LfsrTimer = LfsrTimer { at_h0: 0, taps: (0, 0), terminal: 0, reload: [0; 16] };\npub static DMC_TIMER: LfsrTimer = LfsrTimer { at_h0: 0, taps: (0, 0), terminal: 0, reload: [0; 16] };\n");
         std::fs::write(&out, s).unwrap();
         return;
     }
@@ -316,9 +351,23 @@ fn main() {
         duty.reverse();
         println!("cargo:warning=v2a03-micro: MUTATE=1, the duty table is REVERSED; the APU gate must go red");
     }
-    let (f4, p4) = frame(0);
-    let (f5, p5) = frame(1);
-    let (f0, _) = frame(2);
+    let (f4, p4) = frame(0, false);
+    let (f5, p5) = frame(1, false);
+    let (f0, _) = frame(2, false);
+    // The other parity: every rise two half-steps later, both modes (the
+    // jitter blargg's apu_test 4 asks about), held here so a table that
+    // stopped saying so fails the build by name.
+    let (f4o, p4o) = frame(0, true);
+    let (f5o, p5o) = frame(1, true);
+    for (name, a, b, pa, pb) in [("mode 0", &f4, &f4o, p4, p4o), ("mode 1", &f5, &f5o, p5, p5o)] {
+        assert_eq!(pa, pb, "{name}: the period differs by write parity");
+        assert_eq!(a.len(), b.len(), "{name}: the phase list differs by write parity");
+        for (x, y) in a.iter().zip(b) {
+            assert_eq!(x.1, y.1, "{name}: the phase order differs by write parity");
+            assert_eq!(y.0, x.0 + FRAME_JITTER, "{name}: phase {} rises at {} on one parity and {} on the other, not {} apart", x.1, x.0, y.0, FRAME_JITTER);
+        }
+    }
+    let m1 = mode1_clock();
     let nt = lfsr_timer("noi_t", 11, 2100);
     let dt = lfsr_timer("pcm_t", 9, 560);
     let (dmc, dmc_reload) = dmc_rate(dt.terminal);
@@ -345,6 +394,8 @@ fn main() {
     writeln!(s, "pub static FRAME_5: &[(u32, u8)] = &{f5:?};").unwrap();
     writeln!(s, "pub static FRAME_5_PERIOD: u32 = {p5};").unwrap();
     writeln!(s, "pub static FRAME_POWER_ON: u32 = {};", f0[0].0).unwrap();
+    writeln!(s, "pub static FRAME_JITTER: u32 = {FRAME_JITTER};").unwrap();
+    writeln!(s, "pub static MODE1_CLOCK: u32 = {m1};").unwrap();
     std::fs::write(&out, s).unwrap();
     println!(
         "cargo:warning=v2a03-micro: APU tables recorded: length {:?}, noise {:?}, dmc {:?}, duty {:?}, frame4 {:?} period {p4}, frame5 {:?} period {p5}, power-on phase_a at {}; noise timer at h0 {} taps {:?} terminal {} reload {:?}; dmc timer at h0 {} taps {:?} terminal {} reload {:?}",

@@ -32,10 +32,24 @@ fn w(reg: u8, v: u8) -> [u8; 5] {
 /// length and linear expiries and the envelope's floor all land inside
 /// the window; the first world holds long notes so the sweeps run to
 /// their mutes and the DMC loops its sample.
-fn program(five_step: bool, short: bool) -> Vec<u8> {
+fn program(five_step: bool, short: bool, odd: bool, late: bool, none: bool) -> Vec<u8> {
     let mut p = Vec::new();
-    p.extend(w(0x17, if five_step { 0x80 } else { 0x00 }));
+    if odd {
+        // A three-cycle instruction ahead of the $4017 write puts it on
+        // the other APU cycle parity (an APU cycle is two CPU cycles, so
+        // a NOP would not): the jitter world.
+        p.extend([0x85, 0x00]);
+    }
+    // `late` writes the mode after the notes are loaded, so a mode-1
+    // write's immediate quarter and half clocks meet loaded counters
+    // (blargg's len_ctr #4).
+    if !late && !none {
+        p.extend(w(0x17, if five_step { 0x80 } else { 0x00 }));
+    }
     p.extend(w(0x15, 0x0f));
+    // `late` with `short` is the only shape that writes the mode after
+    // the notes; a world with neither early nor late write (`none` below)
+    // leaves the power-on sequencer running.
     if short {
         // Square 0: duty 3, envelope period 1, no loop, length index 3.
         p.extend(w(0x00, 0xc1));
@@ -60,6 +74,13 @@ fn program(five_step: bool, short: bool) -> Vec<u8> {
         p.extend(w(0x11, 0x60));
         p.extend(w(0x12, 0x00));
         p.extend(w(0x13, 0x01));
+        // The late mode write comes after the notes and before the DMC
+        // is enabled: the DMC's first fetch would stall the write on the
+        // chip, which this gate's core-alone harness does not model
+        // (tests/stalls.rs holds the stalls through the Rung).
+        if late && !none {
+            p.extend(w(0x17, if five_step { 0x80 } else { 0x00 }));
+        }
         p.extend(w(0x15, 0x1f));
         let spin = 0x8000 + p.len() as u16;
         p.extend([0x4c, spin as u8, (spin >> 8) as u8]);
@@ -88,6 +109,9 @@ fn program(five_step: bool, short: bool) -> Vec<u8> {
     p.extend(w(0x11, 0x20));
     p.extend(w(0x12, 0x00));
     p.extend(w(0x13, 0x02));
+    if late && !none {
+        p.extend(w(0x17, if five_step { 0x80 } else { 0x00 }));
+    }
     p.extend(w(0x15, 0x1f));
     let spin = 0x8000 + p.len() as u16;
     p.extend([0x4c, spin as u8, (spin >> 8) as u8]);
@@ -148,8 +172,17 @@ fn the_five_output_codes_match_rung_0_every_half_step_in_both_frame_modes() {
         return;
     }
     let dump = std::env::var_os("APU_DUMP").is_some();
-    for (five, short) in [(false, false), (true, false), (false, true), (true, true)] {
-        let loads = vec![Load { org: 0x8000, bytes: program(five, short) }, Load { org: 0xc000, bytes: sample() }];
+    // (five-step, short notes, odd write parity, mode written last, no
+    // mode write at all: the power-on sequencer).
+    for (five, short, odd, late, none) in [
+        (false, false, false, false, false), (true, false, false, false, false), (false, true, false, false, false), (true, true, false, false, false),
+        (false, true, true, false, false), (true, true, true, false, false), (true, true, false, true, false), (true, true, true, true, false), (false, true, false, true, false),
+        (false, true, false, false, true),
+    ] {
+        let loads = vec![Load { org: 0x8000, bytes: program(five, short, odd, late, none) }, Load { org: 0xc000, bytes: sample() }];
+        if std::env::var_os("APU_PROG").is_some() {
+            eprintln!("program ({five}, {short}, {odd}, {late}, {none}): {}", loads[0].bytes.iter().map(|b| format!("{b:02x}")).collect::<String>());
+        }
         let want = rung0_codes(&loads);
         let got = rung_codes(&loads);
         // MUTATE=1 acts at build time (build.rs reverses the duty table)
@@ -169,8 +202,10 @@ fn the_five_output_codes_match_rung_0_every_half_step_in_both_frame_modes() {
                 // The change events of the first differing channel on
                 // both engines, 3000 half-steps either side.
                 let ch = (0..5).find(|&k| want[h].0[k] != got[h].0[k]).unwrap_or(0);
-                let lo = h.saturating_sub(3000);
-                let hi = (h + 3000).min(want.len() - 1);
+                // APU_DUMP=all widens the window to the whole run.
+                let all = std::env::var("APU_DUMP").is_ok_and(|v| v == "all");
+                let lo = if all { 0 } else { h.saturating_sub(3000) };
+                let hi = if all { want.len() - 1 } else { (h + 3000).min(want.len() - 1) };
                 let events = |v: &[([u8; 5], bool)]| -> Vec<String> {
                     let mut out = Vec::new();
                     for i in lo.max(1)..=hi {
@@ -185,16 +220,18 @@ fn the_five_output_codes_match_rung_0_every_half_step_in_both_frame_modes() {
                 eprintln!("{}", s);
             }
             panic!(
-                "{}-step mode, {} world: codes diverge at h={h} ({diverging} of {} half-steps differ):\n{s}",
+                "{}-step mode, {}{} world: codes diverge at h={h} ({diverging} of {} half-steps differ):\n{s}",
                 if five { 5 } else { 4 },
                 if short { "short-note" } else { "long-note" },
+                match (odd, late, none) { (_, _, true) => " (no mode write: the power-on sequencer)", (true, true, _) => " (odd write parity, mode written last)", (true, false, _) => " (odd write parity)", (false, true, _) => " (mode written last)", _ => "" },
                 want.len()
             );
         }
         eprintln!(
-            "{}-step mode, {} world: {} half-steps, five codes and the frame IRQ flag identical to rung 0",
+            "{}-step mode, {}{} world: {} half-steps, five codes and the frame IRQ flag identical to rung 0",
             if five { 5 } else { 4 },
             if short { "short-note" } else { "long-note" },
+            match (odd, late, none) { (_, _, true) => " (no mode write: the power-on sequencer)", (true, true, _) => " (odd write parity, mode written last)", (true, false, _) => " (odd write parity)", (false, true, _) => " (mode written last)", _ => "" },
             want.len()
         );
     }

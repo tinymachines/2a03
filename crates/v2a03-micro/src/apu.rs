@@ -31,10 +31,24 @@ pub mod fit {
     /// The frame counter's position as the $4017 write's own frame
     /// begins (the recorder counted its offsets from that strobe frame).
     pub const FRAME_WRITE_LAG: u32 = 0;
+    /// The write's APU cycle parity: a write whose frame index has this
+    /// residue modulo four is the recorder's parity (every event at the
+    /// table's offset); the other parity holds the sequencer
+    /// `tables::FRAME_JITTER` half-steps before it starts (blargg's
+    /// jitter). Fitted by the gate's odd-parity programs, the way the
+    /// tick phases were; MUTATE=1 on the gate swaps it.
+    pub fn frame_write_short_phase() -> u64 {
+        if std::env::var_os("MUTATE").is_some() { 0 } else { 2 }
+    }
     /// The frame counter's position at the pin contract's h=0, expressed
-    /// as half-steps already elapsed toward the first phase_a.
+    /// as half-steps already elapsed toward the first phase_a. The write
+    /// table counts from the write's own frame, which is the frame the
+    /// APU applies it in; the first `half_step` after `new` is the frame
+    /// after h=0, so one more has elapsed by then (a world with no $4017
+    /// write at all, `tests/apu.rs`, put the power-on quarter frame a
+    /// half-step late without it).
     pub fn frame_pos_at_h0() -> u32 {
-        tables::FRAME_4[0].0 - tables::FRAME_POWER_ON
+        tables::FRAME_4[0].0 - tables::FRAME_POWER_ON + 1
     }
     /// Which of the four half-steps a square's timer ticks on: the tick
     /// lands on phi1 of alternate CPU cycles, 3 half-steps after a $4003
@@ -550,6 +564,9 @@ pub struct Apu {
     /// Half-steps elapsed on the frame sequencer's clock since its
     /// (re)start; compared against the mode's table.
     frame_pos: u32,
+    /// Half-steps the sequencer still waits before `frame_pos` moves
+    /// (the other write parity's jitter).
+    frame_hold: u32,
     five_step: bool,
     irq_inhibit: bool,
     pub frame_irq: bool,
@@ -587,6 +604,7 @@ impl Apu {
             noise: Noise::default(),
             dmc: Dmc::default(),
             frame_pos: fit::frame_pos_at_h0(),
+            frame_hold: 0,
             five_step: false,
             irq_inhibit: false,
             frame_irq: false,
@@ -627,7 +645,24 @@ impl Apu {
                 if self.irq_inhibit {
                     self.frame_irq = false;
                 }
+                // The sequencer restarts; on the other APU parity it
+                // waits FRAME_JITTER half-steps first, and every event
+                // lands that much later (measured, `apu-write-probe`).
+                let hold = if self.h % 4 == fit::frame_write_short_phase() { 0 } else { tables::FRAME_JITTER };
                 self.frame_pos = fit::FRAME_WRITE_LAG;
+                self.frame_hold = hold;
+                if self.five_step {
+                    // A mode-1 write clocks the quarter and half frames
+                    // at once: the same effects a phase-1 rise schedules,
+                    // from the write's own frame, so the length counters
+                    // move at MODE1_CLOCK half-steps after the strobe
+                    // (three, the measured figure, which is the phase
+                    // path's own length lag).
+                    let lead = (tables::MODE1_CLOCK - fit::SQ_LENGTH_LAG as u32) as u8 + hold as u8;
+                    self.frame_due = Some((1, fit::FRAME_EFFECT_LAG + lead));
+                    self.tri_due = Some(fit::TRI_FRAME_LAG + lead);
+                    self.sq_len_due = Some(fit::SQ_LENGTH_LAG + lead);
+                }
             }
             _ => {}
         }
@@ -738,9 +773,13 @@ impl Apu {
                 self.frame_due = Some((phase, due - 1));
             }
         }
-        self.frame_pos += 1;
-        if self.frame_pos >= table[0].0 + period {
-            self.frame_pos = table[0].0;
+        if self.frame_hold > 0 {
+            self.frame_hold -= 1;
+        } else {
+            self.frame_pos += 1;
+            if self.frame_pos >= table[0].0 + period {
+                self.frame_pos = table[0].0;
+            }
         }
         // The timers, each on its own half-step grain.
         if (self.h as u32 + fit::SQ_TICK_PHASE).is_multiple_of(4) {
