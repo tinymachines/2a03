@@ -215,9 +215,10 @@ impl PinEngine for Rung {
             self.apu.borrow_mut().half_step(&mut |a| core.bus_read(a));
         }
         // A DMC fetch the APU performed this frame becomes a stall: RDY
-        // falls one frame on (six from the enable write's frame).
-        if let Some((addr, from_enable)) = self.apu.borrow_mut().dmc.fetched.take() {
-            let request = h + if from_enable { 6 } else { 1 };
+        // falls one frame on (six from the enable write's frame, or
+        // eight on the other APU parity; the APU says which).
+        if let Some((addr, delay)) = self.apu.borrow_mut().dmc.fetched.take() {
+            let request = h + delay as u64;
             self.fetch = Some(DmcFetch { addr, request, read: None, done: None });
         }
         if let Some(fe) = self.fetch {

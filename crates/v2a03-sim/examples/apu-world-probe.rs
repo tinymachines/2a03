@@ -52,6 +52,7 @@ fn main() {
     ];
     let singles: Vec<(&str, halfphi::NodeId)> = vec![
         ("quarter(low)", n("frm_/quarter")), ("half(low)", n("frm_/half")), ("envmode", n(&format!("{sq}_envmode"))), ("silence", n(&format!("{sq}_silence"))),
+        ("frame_irq", n("frame_irq")), ("r4015(low)", n("/r4015")), ("ack_irq", n("ack_frame_irq_r4015")),
     ];
     let bits = |h: &Harness, ns: &[halfphi::NodeId]| -> u32 { ns.iter().enumerate().map(|(i, &nd)| (h.cpu.engine.is_high(nd) as u32) << i).sum() };
     let mut prev_b: Vec<u32> = buses.iter().map(|(_, b)| bits(h, b)).collect();

@@ -78,6 +78,26 @@ pub mod fit {
     /// after the noise's from the same half-frame clock (fitted 3; the
     /// squares' sweeps and envelopes stay at FRAME_EFFECT_LAG).
     pub const SQ_LENGTH_LAG: u8 = 3;
+    /// Half-steps after the fourth step's set over which the frame IRQ
+    /// flag is set again each half-step (the die's three consecutive
+    /// cycles: the set's own and the two after; a clear inside them is
+    /// undone, one at four half-steps is not). Measured, see
+    /// `Apu::irq_set_hold`.
+    pub const IRQ_SET_HOLD: u8 = 4;
+    /// Half-steps by which $4015 shows the triangle's and the noise's
+    /// length state late against this model's counters (see
+    /// `Apu::len_hist`); fitted by `tests/reads.rs`.
+    pub const LEN_STATUS_LAG: usize = 2;
+    /// Half-steps from a DMC fetch's raising to the frame RDY falls on:
+    /// the enable's (plus the parity jitter) and the byte boundary's
+    /// (the stall gate's measurements; the read then lands on the get
+    /// grid, three or more on, and the byte is counted off four on).
+    pub const DMC_ENABLE_REQUEST: u8 = 6;
+    pub const DMC_BYTE_REQUEST: u8 = 1;
+    /// Half-steps after the fetch's read frame at which the byte is
+    /// counted off (the status shows it, the IRQ flag rises): five or six
+    /// fit the reads gate's sweep on both parities, seven does not.
+    pub const DMC_LAND_AFTER_READ: u64 = 6;
     use crate::tables;
 }
 
@@ -439,10 +459,19 @@ pub struct Dmc {
     pub irq: bool,
     enabled: bool,
     /// A sample byte fetched this half-step, for the rung's stall: the
-    /// address, and whether the enable write asked for it (the byte
-    /// boundary's fetch and the enable's reach the bus on different
-    /// schedules, measured).
-    pub fetched: Option<(u16, bool)>,
+    /// address, and the half-steps from this frame to the one RDY falls
+    /// on (the byte boundary's fetch asks one on; the enable's six, or
+    /// eight on the other APU cycle parity, the frame counter's own
+    /// jitter, measured in the stall gate's odd world).
+    pub fetched: Option<(u16, u8)>,
+    /// A fetch raised but not yet landed: its bookkeeping (the byte
+    /// counted off, the loop's reload or the IRQ flag) waits for the
+    /// half-step the die's bus read of the byte falls on: the request
+    /// plus three, on the DMA's get grid (`tests/reads.rs`: a one-byte
+    /// sample started on an empty buffer still reads as one byte
+    /// remaining four cycles after the enable, and as fetched with the
+    /// IRQ flag set from six; blargg's 7-dmc_basics #19).
+    land_at: Option<u64>,
 }
 
 impl Default for Dmc {
@@ -461,6 +490,7 @@ impl Default for Dmc {
             buffer: None,
             shifter: 0xff,
             bits: 0,
+            land_at: None,
             silence: true,
             timer: Timer::new(&tables::DMC_TIMER, 9, fit::DMC_UNIT_LAG),
             irq: false,
@@ -486,37 +516,53 @@ impl Dmc {
             _ => self.sample_len = ((v as u16) << 4) | 1,
         }
     }
-    fn set_enabled(&mut self, on: bool, read: &mut dyn FnMut(u16) -> u8) {
+    /// `h` is the APU's half-step, `jitter` the enable's parity lag.
+    fn set_enabled(&mut self, on: bool, read: &mut dyn FnMut(u16) -> u8, h: u64, jitter: u8) {
         self.enabled = on;
         if on {
-            if self.remaining == 0 {
+            if self.remaining == 0 && self.land_at.is_none() {
                 self.addr = self.sample_addr;
                 self.remaining = self.sample_len;
             }
             if self.buffer.is_none() {
-                self.fetch(read);
-                if let Some(f) = self.fetched.as_mut() {
-                    f.1 = true;
-                }
+                self.fetch(read, h, fit::DMC_ENABLE_REQUEST + jitter);
             }
         } else {
             self.remaining = 0;
+            self.land_at = None;
         }
     }
-    fn fetch(&mut self, read: &mut dyn FnMut(u16) -> u8) {
+    /// The byte is read now (the shifter may need it at the next wrap)
+    /// and its bookkeeping lands where the die's bus read does: RDY
+    /// falls `delay` half-steps on, and the read is the first get frame
+    /// three or more after that.
+    fn fetch(&mut self, read: &mut dyn FnMut(u16) -> u8, h: u64, delay: u8) {
         if self.remaining == 0 {
             return;
         }
-        self.fetched = Some((self.addr, false));
+        self.fetched = Some((self.addr, delay));
         self.buffer = Some(read(self.addr));
         self.addr = if self.addr == 0xffff { 0x8000 } else { self.addr + 1 };
-        self.remaining -= 1;
-        if self.remaining == 0 {
-            if self.loop_ {
-                self.addr = self.sample_addr;
-                self.remaining = self.sample_len;
-            } else if self.irq_enable {
-                self.irq = true;
+        let request = h + delay as u64;
+        let mut at = request + 3;
+        while !at.is_multiple_of(4) {
+            at += 1;
+        }
+        // The byte is counted off six half-steps after its read frame
+        // (the reads gate, both parities; seven is red).
+        self.land_at = Some(at + fit::DMC_LAND_AFTER_READ);
+    }
+    fn land(&mut self, h: u64) {
+        if self.land_at == Some(h) {
+            self.land_at = None;
+            self.remaining -= 1;
+            if self.remaining == 0 {
+                if self.loop_ {
+                    self.addr = self.sample_addr;
+                    self.remaining = self.sample_len;
+                } else if self.irq_enable {
+                    self.irq = true;
+                }
             }
         }
     }
@@ -527,7 +573,8 @@ impl Dmc {
     /// output moves by the bit shifted out unless silent, the shifter
     /// shifts, the bit counter wraps, and at the wrap the buffer (if
     /// full) becomes the next byte and its refill is fetched.
-    fn half_step(&mut self, read: &mut dyn FnMut(u16) -> u8) {
+    fn half_step(&mut self, read: &mut dyn FnMut(u16) -> u8, h: u64) {
+        self.land(h);
         if !self.timer.half_step() {
             return;
         }
@@ -547,7 +594,7 @@ impl Dmc {
                 Some(b) => {
                     self.silence = false;
                     self.shifter = b;
-                    self.fetch(read);
+                    self.fetch(read, h, fit::DMC_BYTE_REQUEST);
                 }
                 None => self.silence = true,
             }
@@ -570,6 +617,22 @@ pub struct Apu {
     /// A sampled status read clears the frame IRQ flag at the end of
     /// the half-step it sampled.
     irq_clear_pending: bool,
+    /// The triangle's and the noise's length state over the last four
+    /// half-steps (bit 0 the triangle playing, bit 1 the noise), for the
+    /// status read: on the die every length counter moves on one
+    /// half-step (`apu-length-probe2`), while this model clocks the
+    /// squares' `fit::SQ_LENGTH_LAG` after a phase and the other two
+    /// `fit::FRAME_EFFECT_LAG` after, each where its output needed it;
+    /// $4015 shows the triangle's and the noise's as they stood
+    /// `fit::LEN_STATUS_LAG` half-steps ago, which puts all four bits on
+    /// the die's half-step (`tests/reads.rs`).
+    len_hist: [u8; 4],
+    /// Half-steps over which the fourth step keeps setting the frame IRQ
+    /// flag: the die sets it on three consecutive cycles, so a read that
+    /// clears it inside the first two finds it set again a half-step on
+    /// (MEASURED: apu-world-probe with reads stepped a half-cycle at a
+    /// time across the rise; blargg's 6-irq_flag_timing #4 and #5).
+    irq_set_hold: u8,
     five_step: bool,
     irq_inhibit: bool,
     pub frame_irq: bool,
@@ -609,6 +672,8 @@ impl Apu {
             frame_pos: fit::frame_pos_at_h0(),
             frame_hold: 0,
             irq_clear_pending: false,
+            len_hist: [0; 4],
+            irq_set_hold: 0,
             five_step: false,
             irq_inhibit: false,
             frame_irq: false,
@@ -640,8 +705,9 @@ impl Apu {
                 self.sq[1].len.set_enabled(v & 2 != 0);
                 self.tri.len.set_enabled(v & 4 != 0);
                 self.noise.len.set_enabled(v & 8 != 0);
-                self.dmc.set_enabled(v & 0x10 != 0, read);
                 self.dmc.irq = false;
+                let jitter = if self.h % 4 == fit::frame_write_short_phase() { 0 } else { tables::FRAME_JITTER as u8 };
+                self.dmc.set_enabled(v & 0x10 != 0, read, self.h, jitter);
             }
             0x17 => {
                 self.five_step = v & 0x80 != 0;
@@ -707,10 +773,13 @@ impl Apu {
                 v |= 1 << i;
             }
         }
-        if self.tri.len.playing() && self.tri.len.enabled {
+        // The entry for frame k sits at k % 4; the state shown is
+        // frame (h - 1 - LAG)'s, the last written being h - 1's.
+        let old = self.len_hist[(self.h as usize + 4 - 1 - fit::LEN_STATUS_LAG) % 4];
+        if old & 1 != 0 {
             v |= 4;
         }
-        if self.noise.len.playing() && self.noise.len.enabled {
+        if old & 2 != 0 {
             v |= 8;
         }
         if self.dmc.remaining > 0 {
@@ -743,6 +812,12 @@ impl Apu {
     pub fn half_step(&mut self, read: &mut dyn FnMut(u16) -> u8) {
         if let Some((reg, v)) = self.pending.take() {
             self.apply(reg, v, read);
+        }
+        if self.irq_set_hold > 0 {
+            self.irq_set_hold -= 1;
+            if !self.irq_inhibit {
+                self.frame_irq = true;
+            }
         }
         // The frame sequencer: the table's phase rises at their measured
         // offsets, repeating on the period.
@@ -791,6 +866,7 @@ impl Apu {
                         self.half();
                         if !self.irq_inhibit {
                             self.frame_irq = true;
+                            self.irq_set_hold = fit::IRQ_SET_HOLD;
                         }
                     }
                     _ => {
@@ -823,12 +899,13 @@ impl Apu {
             self.dmc.tick();
         }
         self.noise.half_step();
-        self.dmc.half_step(read);
+        self.dmc.half_step(read, self.h);
         self.sq_lag[(self.h as usize) % 4] = [self.sq[0].out(), self.sq[1].out(), self.noise.out()];
         if self.irq_clear_pending {
             self.irq_clear_pending = false;
             self.frame_irq = false;
         }
+        self.len_hist[(self.h as usize) % 4] = (self.tri.len.playing() && self.tri.len.enabled) as u8 | ((self.noise.len.playing() && self.noise.len.enabled) as u8) << 1;
         self.h += 1;
     }
 

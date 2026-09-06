@@ -32,8 +32,15 @@ fn dma_program(shift: bool) -> Vec<Load> {
     vec![Load { org: 0x8000, bytes: prog }, Load { org: 0x0200, bytes: page }]
 }
 
-fn dmc_program() -> Vec<Load> {
+fn dmc_program(odd: bool) -> Vec<Load> {
     let mut prog = Vec::new();
+    if odd {
+        // A three-cycle instruction first: the enable lands on the other
+        // APU cycle parity (an APU cycle is two CPU cycles). BIT, not a
+        // store: a store of the power-on A would compare two dies'
+        // undefined registers.
+        prog.extend([0x24, 0x00]);
+    }
     for (r, v) in [(0x10u8, 0x4fu8), (0x11, 0x20), (0x12, 0x00), (0x13, 0x02), (0x15, 0x1f)] {
         prog.extend(w(r, v));
     }
@@ -78,5 +85,6 @@ fn the_sprite_dma_and_the_dmc_fetch_stall_the_core_as_rung_0_does() {
     }
     compare("sprite DMA, write on an even cycle", &dma_program(false), 1200);
     compare("sprite DMA, write on an odd cycle", &dma_program(true), 1200);
-    compare("DMC fetches", &dmc_program(), 4200);
+    compare("DMC fetches", &dmc_program(false), 4200);
+    compare("DMC fetches, enabled on an odd cycle", &dmc_program(true), 4200);
 }
