@@ -22,8 +22,13 @@ whole presented at the pin contract by `Rung`, which is what a console
 attaches to. Step 5 (the stalls) closed last: the sprite DMA at both
 write alignments and the DMC's sample fetches against rung 0 **frame
 for frame in every field, RDY included** (1,201 + 1,201 + 4,201
-frames; RDY low on 1,029, 1,027 and 19). `MUTATE=1` shortens the DMA by
-a pair and the gate goes red. About 9x real time with everything
+frames; RDY low on 1,029, 1,027 and 19), and since 2026-09-06 a DMC
+fetch landing inside the sprite DMA (the DMA pauses two cycles, the
+sample read then the core's held cycle, and resumes; five cases frame
+for frame, the die's disturbed sample address the one named class and
+a bench finding, docs/n3-report.md). `MUTATE=1` shortens the DMA by
+a pair and the gate goes red; `MUTATE_COLLISION=1` lets the fetch take
+no cycles and goes red. About 9x real time with everything
 attached. The `$4015` read joined on 2026-09-06 (`tests/reads.rs`, the
 console's apu_test results the finder): the Rung on a bus against
 rung 0 with a status read stepped a cycle at a time across the fourth

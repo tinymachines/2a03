@@ -85,6 +85,15 @@ struct SpriteDma {
     /// The frame of the last write, once done: RDY shows high from the
     /// next frame and the core is released two frames on.
     done: Option<u64>,
+    /// A DMC fetch that landed inside this DMA: the get frame its read
+    /// took. MEASURED on rung 0 (tests/stalls.rs, the collision probe):
+    /// the sample read takes the get cycle the DMA was about to use, the
+    /// core's held cycle shows for the cycle after it, and the DMA
+    /// resumes with the pair that was due on the next get frame, RDY low
+    /// throughout: two cycles per collision. Where rung 0 reads the
+    /// sample FROM is its own finding (docs/n3-report.md): the address
+    /// here is the DMC's documented one.
+    collision: Option<(u64, u16)>,
 }
 
 /// A DMC sample fetch in flight.
@@ -107,6 +116,9 @@ pub struct Rung {
     /// The stall gate's MUTATE=1 sets 255 and must go red at the last
     /// pair; setting it anywhere else is a bug by name.
     pub dma_pairs: usize,
+    /// The stall gate's collision mutation: false lets a DMC fetch inside
+    /// the sprite DMA take no cycles, and must go red.
+    pub collision_pause: bool,
     h: u64,
     dma: Option<SpriteDma>,
     fetch: Option<DmcFetch>,
@@ -123,7 +135,7 @@ impl Rung {
     pub fn new(loads: &[Load], reset_vector: u16, stack_at_h0: u8) -> Rung {
         let core = crate::core(loads, reset_vector, stack_at_h0);
         let frame = core.pins();
-        Rung { core, apu: Rc::new(RefCell::new(Apu::new())), dma_pairs: 256, h: 0, dma: None, fetch: None, frame, loads: loads.to_vec(), reset_vector, stack_at_h0, outer: None }
+        Rung { core, apu: Rc::new(RefCell::new(Apu::new())), dma_pairs: 256, collision_pause: true, h: 0, dma: None, fetch: None, frame, loads: loads.to_vec(), reset_vector, stack_at_h0, outer: None }
     }
 
     /// The chip on a console's bus: every read and write the core makes
@@ -135,6 +147,7 @@ impl Rung {
             core: MicroCpu::new(),
             apu: Rc::new(RefCell::new(Apu::new())),
             dma_pairs: 256,
+            collision_pause: true,
             h: 0,
             dma: None,
             fetch: None,
@@ -197,7 +210,7 @@ impl PinEngine for Rung {
         // falls here, so the core samples it low at the phi2 and holds
         // the next cycle, as rung 0 does.
         if f.ab == 0x4014 && !f.rw && !f.clk0 && self.dma.is_none() {
-            self.dma = Some(SpriteDma { page: 0, strobe: h + 1, start: None, byte: 0, done: None });
+            self.dma = Some(SpriteDma { page: 0, strobe: h + 1, start: None, byte: 0, done: None, collision: None });
             self.core.set_inputs(f.res, f.irq, f.nmi, false, false);
         }
         // The core's writes reach the APU on their phi2 frame.
@@ -221,7 +234,9 @@ impl PinEngine for Rung {
             let request = h + delay as u64;
             self.fetch = Some(DmcFetch { addr, request, read: None, done: None });
         }
-        if let Some(fe) = self.fetch {
+        // The standalone stall, when no sprite DMA holds the bus; inside
+        // one the fetch is the DMA's collision below.
+        if let Some(fe) = self.fetch.filter(|_| self.dma.is_none()) {
             if h + 1 == fe.request {
                 self.core.set_inputs(f.res, f.irq, f.nmi, false, false);
             }
@@ -277,6 +292,35 @@ impl PinEngine for Rung {
             }
             if d.start.is_none() && h >= d.strobe + 3 && Rung::is_get(h) {
                 d.start = Some(h);
+            }
+            // A DMC fetch due inside the DMA takes this get frame for its
+            // read; the DMA's pairs resume four half-steps later.
+            if let (Some(s), Some(fe)) = (d.start, self.fetch) {
+                if d.collision.is_none() && fe.read.is_none() && h >= fe.request + 3 && h >= s && Rung::is_get(h) {
+                    if self.collision_pause {
+                        d.collision = Some((h, fe.addr));
+                        d.start = Some(s + 4);
+                    }
+                    self.fetch = None;
+                }
+            }
+            if let Some((c, addr)) = d.collision {
+                if h < c + 2 {
+                    // The sample read, on the DMC's own address.
+                    f.ab = addr;
+                    f.db = self.core.bus_read(addr);
+                    f.rw = true;
+                    self.dma = Some(d);
+                    self.frame = f;
+                    return;
+                }
+                if h < c + 4 {
+                    // The core's held cycle shows through for one cycle.
+                    self.dma = Some(d);
+                    self.frame = f;
+                    return;
+                }
+                d.collision = None;
             }
             if let Some(s) = d.start {
                 let i = h - s;

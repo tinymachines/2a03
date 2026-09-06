@@ -422,6 +422,37 @@ RDY low on 1,029, 1,027 and 19 of them.
 The rung with the DMA units idle costs nothing over step 4's 32.1 M
 half-cycles/s; a sprite DMA is 1,024 frames of table lookups.
 
+## A DMC fetch inside a sprite DMA (2026-09-06, the carried item)
+
+Measured on rung 0 (`tests/stalls.rs`, the collision probe): the DMC
+playing at its fastest rate while a $4014 DMA runs, the DMA moved over
+the fetch by a NOP sled so the fetch lands well inside it, near its
+start, and on its first frame, on both write parities and at three
+sample addresses. What the die does is the same every time: the sample
+read takes the get cycle the DMA was about to use, the core's held
+cycle shows on the bus for the cycle after it, and the DMA resumes
+with the pair that was due on the next get frame, RDY low throughout,
+so each collision lengthens the DMA by two cycles (a DMA of 1,027 or
+1,029 half-steps becomes 1,031 or 1,033, and 1,035 or 1,037 when two
+fetches land inside). The rung does that now (`SpriteDma::collision`)
+and every frame of every case matches, field for field.
+
+What the die reads the sample FROM is a finding, not a rule. On rung 0
+the DMC's address register is disturbed by the collision: a sample at
+$C001 is read from $8000, at $C041 from $8040, at $C0C1 from $8040, and
+the register stays there, so the next fetch after the DMA reads $8001
+(or $8000 again when the collision was near the DMA's start). The
+documented part reads its sample from its own counter, and every game
+that plays samples across its sprite DMA, which is most of them, says
+so: a part that did this would play garbage after any collision. So
+this is either a real quirk nobody has documented or the switch-level
+model's own in this corner, the way its ANC and ASR bus fights are, and
+a logic analyser on the real part decides. The rung keeps the
+documented address; the gate holds every other field on the collision
+frames and counts the address as the one named class, printing it.
+`MUTATE_COLLISION=1` lets the fetch take no cycles and is red on the
+DMA's every frame after it.
+
 ## N3 as it stands
 
 Steps 1 to 5 closed. The chip is `v2a03-micro`: rung 3 as the core with
@@ -430,5 +461,6 @@ authored around tables measured out of rung 0 with every timing fitted
 against rung 0's code streams, the two DMA units authored from frame
 measurements, the whole held to the switch-level chip at the pins and at
 the five output codes. About 9x real time. Carried: the reset hold
-(step 2), `$4015` reads (closed 2026-09-06, `tests/reads.rs`), and a
-DMC fetch inside a sprite DMA.
+(step 2); `$4015` reads closed 2026-09-06 (`tests/reads.rs`), and the
+DMC fetch inside a sprite DMA the same day (above), its address on the
+die a finding for the bench.
