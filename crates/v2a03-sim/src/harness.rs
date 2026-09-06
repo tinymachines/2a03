@@ -80,18 +80,25 @@ impl Harness {
     /// otherwise spin this loop forever, and a caller driving the reset
     /// pin mid-run wants the fact, not a hang).
     pub fn half_step_bounded(&mut self, max_master_pulses: u32) -> bool {
-        let clk = self.cpu.engine.is_high(self.cpu.sig.clk0);
         let mut spent = 0u32;
-        loop {
-            self.cpu.engine.drive_high(self.cpu.sig.clk_in);
-            self.cpu.engine.drive_low(self.cpu.sig.clk_in);
-            if self.cpu.engine.is_high(self.cpu.sig.clk0) != clk {
-                break;
-            }
+        while !self.master_pulse() {
             spent += 1;
             if spent >= max_master_pulses {
                 return false;
             }
+        }
+        true
+    }
+
+    /// One master clock pulse (high, then low), and the bus serviced
+    /// if clk0 flipped on it; true when it did. The grain a pin driven
+    /// from outside the chip can be timed at (the NMI latency probe).
+    pub fn master_pulse(&mut self) -> bool {
+        let clk = self.cpu.engine.is_high(self.cpu.sig.clk0);
+        self.cpu.engine.drive_high(self.cpu.sig.clk_in);
+        self.cpu.engine.drive_low(self.cpu.sig.clk_in);
+        if self.cpu.engine.is_high(self.cpu.sig.clk0) == clk {
+            return false;
         }
         if clk {
             self.bus_read();

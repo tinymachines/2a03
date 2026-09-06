@@ -218,6 +218,12 @@ cargo run --release -p v2a03-sim --example apu-channel-probe -- duty env sweep t
 cargo run --release -p v2a03-sim --example lockstep-probe   # every trace, every
                                      # differing field classified: the
                                      # measurement the gate's rules are from
+cargo run --release -p v2a03-sim --example nmi-latency-probe
+                                     # the NMI pad driven low at every master
+                                     # pulse across a NOP; where the vector
+                                     # read lands: one pulse of setup before
+                                     # the final phi1 begins, nothing more
+                                     # (the console's gate 1, N5)
 cargo run --release -p v2a03-sim --example reset-probe      # RES held 8..96 phases
                                      # mid-run: the 2A03's held core beside
                                      # the 6502's recording
