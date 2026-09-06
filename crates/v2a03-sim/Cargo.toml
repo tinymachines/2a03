@@ -11,5 +11,5 @@ nes-bus = { git = "https://github.com/tinymachines/nes-bus", tag = "v0.1.1" }
 v2a03-netlist = { path = "../v2a03-netlist" }
 # The 6502 pin contract (MIT, no die data, no engine): the core is presented
 # through it, and the cross-chip gate reads recorded traces in its format.
-v6502-pins = { git = "https://github.com/tinymachines/6502", package = "v6502-pins", rev = "5f169ab" }
+v6502-pins = { git = "https://github.com/tinymachines/6502", package = "v6502-pins", rev = "9c177cd" }
 
