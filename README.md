@@ -242,6 +242,12 @@ cargo run --release -p v2a03-sim --example apu-frame-probe -- 0     # the frame
                                      # sequencer: 0 = 4-step, 1 = 5-step,
                                      # 2 = no $4017 write (power-on position)
 cargo run --release -p v2a03-sim --example apu-length-probe # the 32-entry length table
+cargo run --release -p v2a03-sim --example m2-phase   # the M2 pin against the
+                                     # core's clk0 in master half-steps: M2
+                                     # falls with clk0 (a phi1's start) and
+                                     # rises three early, high 15 of 24, the
+                                     # part's 62.5 percent duty. What the
+                                     # bench's alignment classifier stands on
 cargo run --release -p v2a03-sim --example joy-clock-probe -- [half-steps]
                                      # /OE1 (the pad's clock) per LDA $4016 under
                                      # a looping DMC: which reads pulse it twice
