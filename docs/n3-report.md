@@ -499,6 +499,16 @@ measurement, with the alias exception the documentation does not
 mention. The part's own count, nine clocks on a poll, is the bench's
 to take.
 
+## The M2 pin against the core's clock (2026-09-07, for the bench)
+
+The bench's alignment classifier (tinymachines/nes-bench, B2) reads M2
+off the scope and the console's `Alignment` is defined on the core's
+clk0, so the offset between them had to be a number.
+`v2a03-sim/examples/m2-phase.rs`: M2 falls on the very half-step clk0
+falls, a phi1's start, and rises three half-steps before clk0 rises, so
+it is high for 15 of 24 master half-steps. That is the 62.5 percent
+duty the part is documented with, read off the switches.
+
 ## N3 as it stands
 
 Steps 1 to 5 closed. The chip is `v2a03-micro`: rung 3 as the core with
