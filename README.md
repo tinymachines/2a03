@@ -242,6 +242,19 @@ cargo run --release -p v2a03-sim --example apu-frame-probe -- 0     # the frame
                                      # sequencer: 0 = 4-step, 1 = 5-step,
                                      # 2 = no $4017 write (power-on position)
 cargo run --release -p v2a03-sim --example apu-length-probe # the 32-entry length table
+cargo run --release -p v2a03-sim --example joy-clock-probe -- [half-steps]
+                                     # /OE1 (the pad's clock) per LDA $4016 under
+                                     # a looping DMC: which reads pulse it twice
+                                     # and which sample addresses keep it low;
+                                     # NOPS=n pads the loop, DUMP=a..b prints the
+                                     # half-steps, DECODE=1 reads the aliases
+                                     # plainly, FETCH16=1 fetches with the core
+                                     # idle. The measurement behind tests/joypad.rs
+REQUIRE_NETLIST=1 cargo test --release -p v2a03-micro --test joypad
+                                     # the rung's asks for $4016 per instruction
+                                     # against the die's /OE1 pulses, both
+                                     # cadences; MUTATE_QUIET=1 and MUTATE_HELD=1
+                                     # must go red
 cargo run --release -p v2a03-sim --example apu-dma-probe    # $4014: RDY, the 256 pairs,
                                      # the stall at two alignments
 cargo run --release -p v2a03-sim --example apu-channel-probe -- duty env sweep tri noise dmc io seq dmcseq lfsr triseq

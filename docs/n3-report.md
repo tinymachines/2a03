@@ -453,6 +453,52 @@ frames and counts the address as the one named class, printing it.
 `MUTATE_COLLISION=1` lets the fetch take no cycles and is red on the
 DMA's every frame after it.
 
+## The joypad clock under a DMC fetch (2026-09-06, for the bench)
+
+The controller port's clock is the 2A03's /OE1 pin, the die's `/r4016`,
+low for a read of $4016. The bench's B0 gate (tinymachines/nes-bench)
+counts clocks per latch on the part, and the question it asks is what
+happens when a DMC fetch lands on that read. The die answered first
+(`v2a03-sim/examples/joy-clock-probe.rs`: a looping sample at the
+fastest rate, the pad strobed, `LDA $4016` in a loop):
+
+- On the read the fetch lands on, /r4016 falls with the read, stays low
+  through the halt cycles (one continuous pulse: the halt cycles do not
+  re-pulse it), rises during the fetch's own read of the sample, and
+  falls again when the core re-runs its read with RDY high. Two rising
+  edges, so a 4021 on the port shifts twice, and the core takes the bit
+  after the one it asked for. Every seventh fetch lands there on the
+  7-cycle loop; the other six land on the JMP's cycles and pulse once.
+- Except when the sample's address has the port's low five bits: a
+  fetch from $C016 (and $C036, $C0F6, $C196, twenty aliases over two
+  loop cadences) keeps /r4016 low through the fetch, and the pad is
+  clocked once. A plain read of any alias ($C016, $8016, $4116, $4036)
+  does not pull it low, and a fetch from $C016 with the core idle does
+  not either. So the strobe decodes its high address bits from the
+  core's held address and its low five from the pins the DMA drives,
+  which is a fact about the die's decoder, not about the pad.
+
+The rung follows in two places. Rung 3 (tinymachines/6502 @ 89ae24f)
+re-asks its bus at every phi2 of a held read and keeps the last byte,
+which is what DL does; `RungBus` answers those re-asks from a memo
+while the core is held and lets one through on the re-run, unless the
+fetch's address aliases the port's low five bits. `tests/joypad.rs`
+counts /r4016's falls per instruction on rung 0 and the bus's asks per
+instruction on the rung over the same program, both cadences (the 22nd
+fetch from $C016, the 54th from $C036), and holds the sequences equal:
+{1: 2820, 2: 6} and {1: 2245, 2: 4}, instruction for instruction.
+`MUTATE_QUIET=1` (every held re-ask reaches the world, five per
+collision) and `MUTATE_HELD=1` (rung 3 keeps the first byte, one) are
+both red on the first collision.
+
+What this means for a console: its board is asked for $4016 exactly
+when the part would clock the pad, and the byte the core loads is the
+re-run's. The "DMC DMA corrupts controller reads" behaviour games work
+around (reading twice and comparing) is now in the model by
+measurement, with the alias exception the documentation does not
+mention. The part's own count, nine clocks on a poll, is the bench's
+to take.
+
 ## N3 as it stands
 
 Steps 1 to 5 closed. The chip is `v2a03-micro`: rung 3 as the core with
@@ -461,6 +507,7 @@ authored around tables measured out of rung 0 with every timing fitted
 against rung 0's code streams, the two DMA units authored from frame
 measurements, the whole held to the switch-level chip at the pins and at
 the five output codes. About 9x real time. Carried: the reset hold
-(step 2); `$4015` reads closed 2026-09-06 (`tests/reads.rs`), and the
-DMC fetch inside a sprite DMA the same day (above), its address on the
-die a finding for the bench.
+(step 2); `$4015` reads closed 2026-09-06 (`tests/reads.rs`), the DMC
+fetch inside a sprite DMA the same day (above), its address on the die
+a finding for the bench, and the joypad clock under a DMC fetch (above),
+measured on the die and held by `tests/joypad.rs`.

@@ -45,6 +45,20 @@ use crate::apu::Apu;
 struct RungBus {
     outer: Rc<RefCell<Box<dyn MicroBus>>>,
     apu: Rc<RefCell<Apu>>,
+    /// The core is held and the bus is not re-running its read: the
+    /// core's re-asks (rung 3 asks at every held phi2) are answered from
+    /// the last byte without reaching the world. MEASURED on the die
+    /// (`v2a03-sim`'s `joy-clock-probe`): /OE1 stays low through the
+    /// halt cycles, one continuous pulse, rises for the fetch's own read
+    /// and pulses again only when the held read re-runs with RDY high.
+    /// So the world sees the read twice, before and after, never once per
+    /// held cycle. MUTATE_QUIET=1 lets every re-ask through and must go
+    /// red on the joypad gate.
+    quiet: Rc<std::cell::Cell<bool>>,
+    /// The last byte the world gave for each address, so a quiet re-ask
+    /// answers with what the held read saw (the APU's and the DMA's own
+    /// reads of other addresses pass through in between).
+    memo: Vec<Option<u8>>,
 }
 
 impl MicroBus for RungBus {
@@ -53,7 +67,15 @@ impl MicroBus for RungBus {
         // shows whatever the world drives there (the memory harness's
         // byte in the gates, open bus on a console); the byte the core
         // latches comes through `read_late`.
-        self.outer.borrow_mut().read(a)
+        let quiet = self.quiet.get() && std::env::var_os("MUTATE_QUIET").is_none();
+        if quiet {
+            if let Some(b) = self.memo[a as usize] {
+                return b;
+            }
+        }
+        let v = self.outer.borrow_mut().read(a);
+        self.memo[a as usize] = Some(v);
+        v
     }
     fn write(&mut self, a: u16, v: u8) {
         self.outer.borrow_mut().write(a, v);
@@ -129,13 +151,15 @@ pub struct Rung {
     stack_at_h0: u8,
     /// The console's bus, shared with each core's `RungBus`.
     outer: Option<Rc<RefCell<Box<dyn MicroBus>>>>,
+    /// Shared with the core's `RungBus`: see its `quiet`.
+    quiet: Rc<std::cell::Cell<bool>>,
 }
 
 impl Rung {
     pub fn new(loads: &[Load], reset_vector: u16, stack_at_h0: u8) -> Rung {
         let core = crate::core(loads, reset_vector, stack_at_h0);
         let frame = core.pins();
-        Rung { core, apu: Rc::new(RefCell::new(Apu::new())), dma_pairs: 256, collision_pause: true, h: 0, dma: None, fetch: None, frame, loads: loads.to_vec(), reset_vector, stack_at_h0, outer: None }
+        Rung { core, apu: Rc::new(RefCell::new(Apu::new())), dma_pairs: 256, collision_pause: true, h: 0, dma: None, fetch: None, frame, loads: loads.to_vec(), reset_vector, stack_at_h0, outer: None, quiet: Rc::new(std::cell::Cell::new(false)) }
     }
 
     /// The chip on a console's bus: every read and write the core makes
@@ -156,6 +180,7 @@ impl Rung {
             reset_vector: 0,
             stack_at_h0,
             outer: Some(Rc::new(RefCell::new(bus))),
+            quiet: Rc::new(std::cell::Cell::new(false)),
         };
         r.power_cycle();
         r
@@ -170,7 +195,7 @@ impl Rung {
     fn build_on_bus(&mut self) {
         let outer = self.outer.as_ref().expect("a bus").clone();
         self.apu = Rc::new(RefCell::new(Apu::new()));
-        self.core = crate::core_on_bus(Box::new(RungBus { outer, apu: self.apu.clone() }), self.stack_at_h0);
+        self.core = crate::core_on_bus(Box::new(RungBus { outer, apu: self.apu.clone(), quiet: self.quiet.clone(), memo: vec![None; 0x10000] }), self.stack_at_h0);
     }
 
     /// The four-frame grain the DMA units live on: get cycles begin on
@@ -201,6 +226,20 @@ impl PinEngine for Rung {
     }
 
     fn half_step(&mut self) {
+        // The core's re-asks of a held read reach the world only on the
+        // re-run, when the DMA unit that held it has finished (`done`),
+        // and for a joypad read only if the strobe rose in between.
+        // MEASURED on the die (`joy-clock-probe`, twenty alias addresses
+        // over two cadences): the /OE strobe's high address bits are the
+        // core's held address, its low five the pins', so a sample fetch
+        // from an address whose low five bits are the port's ($xx16 on
+        // $4016, $xx17 on $4017) holds the strobe low through the fetch,
+        // one continuous pulse, and the pad is not clocked again; any
+        // other sample address lets it rise and the re-run pulses it.
+        let held = self.core.pins().ab;
+        let same_strobe = |a: u16| (0x4016..=0x4017).contains(&held) && a & 0x1f == held & 0x1f;
+        let rerun = self.dma.is_some_and(|d| d.done.is_some()) || self.fetch.is_some_and(|f| f.done.is_some() && !same_strobe(f.addr));
+        self.quiet.set(self.core.held() && !rerun);
         self.core.half_step();
         self.h += 1;
         let h = self.h;
