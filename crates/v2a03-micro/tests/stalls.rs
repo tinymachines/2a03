@@ -11,6 +11,7 @@
 //! `MUTATE=1` drops the DMA's last pair and must go red.
 
 use v2a03_micro::rung::Rung;
+use v6502_micro::machine::MicroBus;
 use v2a03_sim::lockstep::classify;
 use v2a03_sim::pins::CorePins;
 use v6502_pins::{line, run, Load, PinEngine};
@@ -75,12 +76,42 @@ fn dmc_in_dma_program_at(gap: usize, odd: bool, addr: u8) -> Vec<Load> {
     vec![Load { org: 0x8000, bytes: prog }, Load { org: 0xc000 + 64 * addr as u16, bytes: sample }, Load { org: 0x0200, bytes: page }]
 }
 
+/// The world outside the chip as a console presents it: flat memory
+/// behind a bus, so the rung's reads go through its own bus wrapper
+/// (the held core's memo lives there; `Rung::new`'s image bypasses it).
+struct Flat(Vec<u8>);
+
+impl MicroBus for Flat {
+    fn read(&mut self, a: u16) -> u8 {
+        self.0[a as usize]
+    }
+    fn write(&mut self, a: u16, v: u8) {
+        self.0[a as usize] = v;
+    }
+}
+
+fn flat(loads: &[Load]) -> Flat {
+    let mut m = vec![0u8; 0x10000];
+    for l in loads {
+        m[l.org as usize..l.org as usize + l.bytes.len()].copy_from_slice(&l.bytes);
+    }
+    m[0xfffc] = 0x00;
+    m[0xfffd] = 0x80;
+    Flat(m)
+}
+
 fn compare(name: &str, loads: &[Load], steps: u64) {
+    compare_with(name, loads, steps, false)
+}
+
+/// `on_bus`: the rung built on a bus (`Rung::with_bus`, the console's
+/// way in) rather than on its own image.
+fn compare_with(name: &str, loads: &[Load], steps: u64, on_bus: bool) {
     let mut r0 = CorePins::new(loads, 0x8000);
     r0.power_cycle();
     let s = r0.stack_pointer();
     let want = run(&mut r0, steps, &[]);
-    let mut rung = Rung::new(loads, 0x8000, s);
+    let mut rung = if on_bus { Rung::with_bus(Box::new(flat(loads)), s) } else { Rung::new(loads, 0x8000, s) };
     if std::env::var("MUTATE").is_ok_and(|v| v == "1") {
         rung.dma_pairs = 255;
     }
@@ -194,4 +225,34 @@ fn a_dmc_fetch_inside_the_sprite_dma_pauses_it_as_rung_0_does() {
         let name = format!("DMC fetch inside sprite DMA, gap {gap}, odd {odd}, sample at {:04x}", 0xc000 + 64 * addr as u16);
         compare(&name, &dmc_in_dma_program_at(gap, odd, addr), 4200);
     }
+}
+
+/// Two sprite DMAs with the page rewritten between them: the second must
+/// carry the page as RAM holds it NOW. The NES console's record of a
+/// commercial cartridge, replayed on the 6502's switch-level rung, found
+/// the rung's DMA copying the page as it was LAST READ: its reads went
+/// through the held core's bus, whose memo (the held read's byte, so a
+/// quiet re-ask never reaches the world) answered every address the DMA
+/// had read before. A game that never reads its sprite buffer got its
+/// first frame's sprites forever; this one's menu waited on a sprite-0
+/// hit that could not come. Rung 0 reads RAM.
+fn two_dmas_program() -> Vec<Load> {
+    let mut prog = Vec::new();
+    prog.extend(w(0x14, 0x02));
+    // $0200 <- $11, $0201 <- $22, $02FF <- $33, then the page again.
+    prog.extend([0xa9, 0x11, 0x8d, 0x00, 0x02, 0xa9, 0x22, 0x8d, 0x01, 0x02, 0xa9, 0x33, 0x8d, 0xff, 0x02]);
+    prog.extend(w(0x14, 0x02));
+    prog.extend([0xea, 0xea, 0xea, 0xea]);
+    let spin = 0x8000 + prog.len() as u16;
+    prog.extend([0x4c, spin as u8, (spin >> 8) as u8]);
+    let page: Vec<u8> = (0..=255u8).map(|i| i.wrapping_mul(3)).collect();
+    vec![Load { org: 0x8000, bytes: prog }, Load { org: 0x0200, bytes: page }]
+}
+
+#[test]
+fn a_second_sprite_dma_carries_the_page_as_ram_holds_it_now() {
+    // On the rung's own image the bus wrapper is not in the path and
+    // this passed before the fix; the console's way in is a bus.
+    compare_with("two DMAs, the page rewritten between, on a bus", &two_dmas_program(), 2400, true);
+    compare("two DMAs, the page rewritten between, on the image", &two_dmas_program(), 2400);
 }

@@ -192,6 +192,27 @@ impl Rung {
         self.outer.clone()
     }
 
+    /// A DMA unit's own read of the world: the memo that answers the held
+    /// core's re-asks (`RungBus::quiet`) is stepped around, because the
+    /// unit is not re-asking anything, it is reading a page as RAM holds
+    /// it now. Through the memo, every address a DMA had read before
+    /// came back as it was THEN: a game that never reads its sprite
+    /// buffer kept its first frame's sprites for good, and the bench's
+    /// cartridge menu waited on a sprite-0 hit that could not come
+    /// (found by the NES console's record replayed on the 6502's
+    /// switch-level rung; `tests/stalls.rs`, two DMAs on a bus).
+    /// MUTATE_DMA_MEMO=1 reads through the memo as before and must go red.
+    fn world_read(&mut self, a: u16) -> u8 {
+        if std::env::var_os("MUTATE_DMA_MEMO").is_some() {
+            return self.core.bus_read(a);
+        }
+        let was = self.quiet.get();
+        self.quiet.set(false);
+        let v = self.core.bus_read(a);
+        self.quiet.set(was);
+        v
+    }
+
     fn build_on_bus(&mut self) {
         let outer = self.outer.as_ref().expect("a bus").clone();
         self.apu = Rc::new(RefCell::new(Apu::new()));
@@ -347,7 +368,7 @@ impl PinEngine for Rung {
                 if h < c + 2 {
                     // The sample read, on the DMC's own address.
                     f.ab = addr;
-                    f.db = self.core.bus_read(addr);
+                    f.db = self.world_read(addr);
                     f.rw = true;
                     self.dma = Some(d);
                     self.frame = f;
@@ -368,7 +389,7 @@ impl PinEngine for Rung {
                     let src = ((d.page as u16) << 8) | pair as u16;
                     match i % 4 {
                         0 => {
-                            d.byte = self.core.bus_read(src);
+                            d.byte = self.world_read(src);
                             f.ab = src;
                             f.db = d.byte;
                             f.rw = true;
