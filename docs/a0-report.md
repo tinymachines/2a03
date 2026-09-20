@@ -19,7 +19,7 @@ switched off diverges from the golden at step 0.
   replay with none (the 6502 carries the rail encoding caveat, the
   2C02 its nine reset-less latches). The unit is the MASTER half-step,
   one `clk_in` toggle; the ÷12 `clk0` is an output the divider
-  produces, and the golden generator restates macros.js initChip
+  produces, and the golden generator restates macros.js's initChip
   statement for statement with the buses undriven.
 
 ## The finding: halfphi's drive order, finally exercised
