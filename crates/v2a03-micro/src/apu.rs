@@ -105,12 +105,38 @@ pub mod fit {
 /// is the measurement; this is the machine). `pending` counts down to the
 /// unit's clock after a terminal tick.
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "state", derive(serde::Serialize, serde::Deserialize))]
 pub struct Timer {
     t: u32,
     mask: u32,
     pending: u8,
     lag: u8,
+    #[cfg_attr(feature = "state", serde(with = "timer_spec"))]
     spec: &'static tables::LfsrTimer,
+}
+
+/// A saved timer names its table rather than pointing at it: the die has
+/// two, and a state that named neither is refused.
+#[cfg(feature = "state")]
+mod timer_spec {
+    use crate::tables::{self, LfsrTimer};
+    pub fn serialize<S: serde::Serializer>(spec: &&'static LfsrTimer, s: S) -> Result<S::Ok, S::Error> {
+        let which: u8 = if std::ptr::eq(*spec, &tables::NOISE_TIMER) {
+            0
+        } else if std::ptr::eq(*spec, &tables::DMC_TIMER) {
+            1
+        } else {
+            return Err(serde::ser::Error::custom("a timer on neither of the die's tables"));
+        };
+        s.serialize_u8(which)
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<&'static LfsrTimer, D::Error> {
+        match <u8 as serde::Deserialize>::deserialize(d)? {
+            0 => Ok(&tables::NOISE_TIMER),
+            1 => Ok(&tables::DMC_TIMER),
+            n => Err(serde::de::Error::custom(format!("timer table {n} is not one of the die's two"))),
+        }
+    }
 }
 
 impl Timer {
@@ -142,6 +168,7 @@ impl Timer {
 }
 
 #[derive(Clone, Copy, Default, Debug)]
+#[cfg_attr(feature = "state", derive(serde::Serialize, serde::Deserialize))]
 pub struct Envelope {
     start: bool,
     divider: u8,
@@ -182,6 +209,7 @@ impl Envelope {
 /// expiring on the clock that would take it below zero, so a channel
 /// plays for n half-frame clocks.
 #[derive(Clone, Copy, Default, Debug)]
+#[cfg_attr(feature = "state", derive(serde::Serialize, serde::Deserialize))]
 pub struct Length {
     count: u8,
     expired: bool,
@@ -218,6 +246,7 @@ impl Length {
 }
 
 #[derive(Clone, Copy, Default, Debug)]
+#[cfg_attr(feature = "state", derive(serde::Serialize, serde::Deserialize))]
 pub struct Square {
     second: bool,
     duty: u8,
@@ -322,6 +351,7 @@ impl Square {
 }
 
 #[derive(Clone, Copy, Default, Debug)]
+#[cfg_attr(feature = "state", derive(serde::Serialize, serde::Deserialize))]
 pub struct Triangle {
     len: Length,
     control: bool,
@@ -389,6 +419,7 @@ impl Triangle {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "state", derive(serde::Serialize, serde::Deserialize))]
 pub struct Noise {
     env: Envelope,
     len: Length,
@@ -440,6 +471,7 @@ impl Noise {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "state", derive(serde::Serialize, serde::Deserialize))]
 pub struct Dmc {
     irq_enable: bool,
     loop_: bool,
@@ -603,6 +635,7 @@ impl Dmc {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "state", derive(serde::Serialize, serde::Deserialize))]
 pub struct Apu {
     pub sq: [Square; 2],
     pub tri: Triangle,

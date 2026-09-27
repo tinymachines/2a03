@@ -12,6 +12,8 @@
 
 pub mod apu;
 pub mod rung;
+#[cfg(feature = "state")]
+pub mod state;
 
 /// The tables measured out of rung 0 at build time (`build.rs`).
 pub mod tables {

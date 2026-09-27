@@ -57,8 +57,9 @@ struct RungBus {
     quiet: Rc<std::cell::Cell<bool>>,
     /// The last byte the world gave for each address, so a quiet re-ask
     /// answers with what the held read saw (the APU's and the DMA's own
-    /// reads of other addresses pass through in between).
-    memo: Vec<Option<u8>>,
+    /// reads of other addresses pass through in between). Shared with the
+    /// rung, which saves it with the rest of the chip.
+    memo: Rc<RefCell<Vec<Option<u8>>>>,
 }
 
 impl MicroBus for RungBus {
@@ -69,12 +70,12 @@ impl MicroBus for RungBus {
         // latches comes through `read_late`.
         let quiet = self.quiet.get() && std::env::var_os("MUTATE_QUIET").is_none();
         if quiet {
-            if let Some(b) = self.memo[a as usize] {
+            if let Some(b) = self.memo.borrow()[a as usize] {
                 return b;
             }
         }
         let v = self.outer.borrow_mut().read(a);
-        self.memo[a as usize] = Some(v);
+        self.memo.borrow_mut()[a as usize] = Some(v);
         v
     }
     fn write(&mut self, a: u16, v: u8) {
@@ -96,7 +97,8 @@ impl MicroBus for RungBus {
 
 /// A sprite DMA in flight.
 #[derive(Clone, Copy, Debug)]
-struct SpriteDma {
+#[cfg_attr(feature = "state", derive(serde::Serialize, serde::Deserialize))]
+pub(crate) struct SpriteDma {
     page: u8,
     /// The frame the $4014 write landed on.
     strobe: u64,
@@ -120,7 +122,8 @@ struct SpriteDma {
 
 /// A DMC sample fetch in flight.
 #[derive(Clone, Copy, Debug)]
-struct DmcFetch {
+#[cfg_attr(feature = "state", derive(serde::Serialize, serde::Deserialize))]
+pub(crate) struct DmcFetch {
     addr: u16,
     /// The frame RDY falls on.
     request: u64,
@@ -153,13 +156,15 @@ pub struct Rung {
     outer: Option<Rc<RefCell<Box<dyn MicroBus>>>>,
     /// Shared with the core's `RungBus`: see its `quiet`.
     quiet: Rc<std::cell::Cell<bool>>,
+    /// Shared with the core's `RungBus`: see its `memo`.
+    memo: Rc<RefCell<Vec<Option<u8>>>>,
 }
 
 impl Rung {
     pub fn new(loads: &[Load], reset_vector: u16, stack_at_h0: u8) -> Rung {
         let core = crate::core(loads, reset_vector, stack_at_h0);
         let frame = core.pins();
-        Rung { core, apu: Rc::new(RefCell::new(Apu::new())), dma_pairs: 256, collision_pause: true, h: 0, dma: None, fetch: None, frame, loads: loads.to_vec(), reset_vector, stack_at_h0, outer: None, quiet: Rc::new(std::cell::Cell::new(false)) }
+        Rung { core, apu: Rc::new(RefCell::new(Apu::new())), dma_pairs: 256, collision_pause: true, h: 0, dma: None, fetch: None, frame, loads: loads.to_vec(), reset_vector, stack_at_h0, outer: None, quiet: Rc::new(std::cell::Cell::new(false)), memo: Rc::new(RefCell::new(vec![None; 0x10000])) }
     }
 
     /// The chip on a console's bus: every read and write the core makes
@@ -181,6 +186,7 @@ impl Rung {
             stack_at_h0,
             outer: Some(Rc::new(RefCell::new(bus))),
             quiet: Rc::new(std::cell::Cell::new(false)),
+            memo: Rc::new(RefCell::new(vec![None; 0x10000])),
         };
         r.power_cycle();
         r
@@ -216,7 +222,31 @@ impl Rung {
     fn build_on_bus(&mut self) {
         let outer = self.outer.as_ref().expect("a bus").clone();
         self.apu = Rc::new(RefCell::new(Apu::new()));
-        self.core = crate::core_on_bus(Box::new(RungBus { outer, apu: self.apu.clone(), quiet: self.quiet.clone(), memo: vec![None; 0x10000] }), self.stack_at_h0);
+        self.memo = Rc::new(RefCell::new(vec![None; 0x10000]));
+        self.core = crate::core_on_bus(Box::new(RungBus { outer, apu: self.apu.clone(), quiet: self.quiet.clone(), memo: self.memo.clone() }), self.stack_at_h0);
+    }
+
+    /// The parts of the state that live on the rung itself (`state.rs`).
+    #[cfg(feature = "state")]
+    pub(crate) fn state_parts(&self) -> (Option<SpriteDma>, Option<DmcFetch>, PinFrame) {
+        (self.dma, self.fetch, self.frame)
+    }
+    #[cfg(feature = "state")]
+    pub(crate) fn quiet_now(&self) -> bool {
+        self.quiet.get()
+    }
+    #[cfg(feature = "state")]
+    pub(crate) fn memo_now(&self) -> Vec<Option<u8>> {
+        self.memo.borrow().clone()
+    }
+    #[cfg(feature = "state")]
+    pub(crate) fn set_state_parts(&mut self, h: u64, dma: Option<SpriteDma>, fetch: Option<DmcFetch>, frame: PinFrame, quiet: bool, memo: &[Option<u8>]) {
+        self.h = h;
+        self.dma = dma;
+        self.fetch = fetch;
+        self.frame = frame;
+        self.quiet.set(quiet);
+        self.memo.borrow_mut().copy_from_slice(memo);
     }
 
     /// The four-frame grain the DMA units live on: get cycles begin on

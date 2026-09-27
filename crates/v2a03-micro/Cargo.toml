@@ -11,7 +11,14 @@ description = "The 2A03's ladder rung: the 6502's rung 3 as this chip's core (de
 # and the two knobs this chip needs landed there under its own golden
 # (tests/knobs.rs at this revision). v6502-pins is pinned at the same
 # revision so the contract cannot drift between the two.
+[features]
+# Saved states: every piece of the chip's state as serde data, for a
+# console to save and restore (nes-console's `state`). Off by default, so
+# the chip itself depends on nothing new.
+state = ["dep:serde"]
+
 [dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
 v6502-micro = { git = "https://github.com/tinymachines/6502", package = "v6502-micro", rev = "3805107" }
 v6502-pins = { git = "https://github.com/tinymachines/6502", package = "v6502-pins", rev = "3805107" }
 
@@ -22,5 +29,9 @@ v2a03-sim = { path = "../v2a03-sim" }
 v2a03-netlist = { path = "../v2a03-netlist" }
 
 [dev-dependencies]
+# The suite always builds with saved states, so tests/state.rs is never
+# compiled out of a run that then reports it passed.
+v2a03-micro = { path = ".", features = ["state"] }
+postcard = { version = "1", default-features = false, features = ["alloc"] }
 v2a03-sim = { path = "../v2a03-sim" }
 v2a03-netlist = { path = "../v2a03-netlist" }
